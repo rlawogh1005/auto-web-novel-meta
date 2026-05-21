@@ -37,7 +37,7 @@ references:
 
 ### SRS-F-001 — 작가의 다음 회차 생성
 
-**설명**: generator는 활성 StorySpec의 `frequency`에 따라 정해진 주기에 깨어나, 해당 Novel의 WriterContext와 직전까지의 Chapter들을 읽어 Anthropic Claude(WORLD §LLM 호출 규칙)를 호출해 다음 Chapter의 draft 본문을 생성하고 저장한다. 이후 LLM 출력에서 추출 가능한 새 일화/떡밥 정보를 WriterContext에 갱신한다.
+**설명**: generator는 활성 StorySpec의 `frequency`에 따라 정해진 주기에 깨어나, 해당 Novel의 WriterContext와 직전까지의 Chapter들을 읽어 LLM(WORLD §LLM 호출 규칙)을 호출해 다음 Chapter의 draft 본문을 생성하고 저장한다. 이후 LLM 출력에서 추출 가능한 새 일화/떡밥 정보를 WriterContext에 갱신한다.
 
 **maps_to_prd**: `PRD-US-01`
 

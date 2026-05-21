@@ -53,7 +53,7 @@ sequenceDiagram
   Note over G,DB: SRS-F-001 · 회차 생성
   loop StorySpec.frequency cron
     G->>DB: SELECT story_specs(active) + writer_contexts + 직전 chapters
-    G->>G: Claude 호출 → 다음 회차 본문 생성
+    G->>G: LLM 호출 → 다음 회차 본문 생성
     G->>DB: BEGIN
     G->>DB: INSERT chapters(novel_id, number=N+1, status='draft', content)
     G->>DB: INSERT generator.draft_runs(chapter_id, llm_metadata)
@@ -77,7 +77,7 @@ sequenceDiagram
   loop pd polling interval [확인 필요]
     P->>DB: SELECT ... FROM chapters WHERE status='in_review' ORDER BY updated_at FOR UPDATE SKIP LOCKED
     alt 대상 있음
-      P->>P: Claude 호출 → 검수 (decision, score, feedback)
+      P->>P: LLM 호출 → 검수 (decision, score, feedback)
       P->>DB: INSERT pd.reviews(chapter_id, decision, quality_score, feedback)
     else 대상 없음
       Note over P: cycle 종료
@@ -107,7 +107,7 @@ sequenceDiagram
 ## 4. 분기 / 실패 경로
 
 ### 4.1 LLM 호출 실패 (generator)
-- generator의 Claude 호출이 실패하면 chapter row를 만들지 않는다.
+- generator의 LLM 호출이 실패하면 chapter row를 만들지 않는다.
 - `generator.draft_runs`에 실패 메타만 남길지 여부는 `[확인 필요]` (실패 로그를 별도 테이블로 분리할지 정책 결정 필요).
 - 같은 Novel에 대해 `status ∈ {draft, in_review}` row가 없다는 §Domain 4.3 불변식이 유지된다.
 - 다음 cycle에 자동 재시도.

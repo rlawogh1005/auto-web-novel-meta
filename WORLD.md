@@ -167,9 +167,9 @@
 ## 공통 규칙 (모든 서비스 강제)
 
 ### LLM 호출
-- 오직 **Anthropic Claude** 사용
-- 환경변수: `ANTHROPIC_API_KEY`
-- SDK: 공식 `anthropic` (Python), `@anthropic-ai/sdk` (Node)
+- LLM 공급자는 `LLM_PROVIDER` 환경변수로 교체 가능, 기본값 **OpenAI**
+- 키는 공급자별 환경변수 (`OPENAI_API_KEY` 등)
+- SDK는 공급자별 공식 SDK
 - 모델 선택은 각 서비스 CLAUDE.md에서
 
 ### DB
