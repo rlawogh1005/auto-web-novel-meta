@@ -12,8 +12,8 @@
 
 | 명세 유형 | 파일 | ID 범위 | 상태 | 최종 갱신 |
 |---|---|---|---|---|
-| Domain Model | [Domain-Model.md](Domain-Model.md) | Novel, Chapter, StorySpec, WriterContext, Foreshadow, Episode, ReviewDecision | 검증 대기 | 2026-05-21 |
-| Data Model | [Data-Model.md](Data-Model.md) | (Domain Model과 동일 엔티티명) + ENUM `chapter_status`, `review_decision` | 검증 대기 | 2026-05-21 |
+| Domain Model | [Domain-Model.md](Domain-Model.md) | Novel, Chapter, StorySpec, Writer, WriterContext, Foreshadow, Episode, ReviewDecision, AgentIdentity, WriterIdentity, ReaderIdentity(개념) | 검증 대기 | 2026-05-21 |
+| Data Model | [Data-Model.md](Data-Model.md) | (Domain Model과 동일 엔티티명) + `generator.writers` + ENUM `chapter_status`, `review_decision` | 검증 대기 | 2026-05-21 |
 | SRS | [SRS.md](SRS.md) | SRS-F-001 ~ SRS-F-004 | 검증 대기 | 2026-05-21 |
 | Sequence / Flow | [Flow-Chapter-Lifecycle.md](Flow-Chapter-Lifecycle.md) | FLOW-CHAPTER-LIFECYCLE | 검증 대기 | 2026-05-21 |
 
@@ -59,6 +59,15 @@
 
 ---
 
+## 기술 빚 / 미작성 명세 (의도된 보류)
+
+> 본 명세 줄기에서 다루지 않지만, 차후 별도 명세 작업에서 해소해야 하는 항목.
+
+- **Novel 연재 생명주기 명세 미작성** — 현재 `Novel.status`는 `drafting → published → archived` 단순 모델이라 *발행 후에도 연재 지속(published + 작가 active 유지)* 같은 웹소설 연재 구조를 아직 다루지 못한다. Domain Model §4.7의 "active = `Novel.status='drafting'`" 단일 기준도 이 미작성에 의존한다. **회차 줄기 완료 후 Novel 상태기계 별도 명세에서 다룬다.**
+
+---
+
 ## 변경 이력
 
 - 2026-05-21: 회차 생성→검수 줄기 명세 4건 신규 작성 — Domain Model, Data Model, SRS (SRS-F-001~004), Sequence/Flow (`FLOW-CHAPTER-LIFECYCLE`). Navigator 인덱스/식별 결과/추적 체크 동시 갱신.
+- 2026-05-21: 고도화된 작가 개념 확장 — Domain Model에 `Writer` 엔티티, `AgentIdentity`/`WriterIdentity` 값 객체, §4.7 Writer↔Novel 1:N + 동시 active 1개 불변식, Aggregate "Novel" 외부 참조 항목, WriterContext의 정체성↔누적상태 구분 박스 추가. Data Model에 `generator.writers` 테이블, `public.novels.writer_id`, `novels_one_active_per_writer` 부분 유니크 인덱스, §6 정체성 저장소(파일) 절 추가(기존 §6 마이그레이션은 §7로 이동). ReaderIdentity는 개념만 언급(viewer 줄기 대기). Navigator에 Novel 연재 생명주기 미작성을 기술 빚으로 기록.

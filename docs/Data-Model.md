@@ -29,6 +29,7 @@ references:
 | `genre` | text | NOT NULL | |
 | `premise` | text | NOT NULL | |
 | `created_by_spec` | UUID | FK → `public.story_specs(id)` | |
+| `writer_id` | text | NOT NULL, FK → `generator.writers(id)` ON DELETE RESTRICT | 이 Novel을 쓰는 작가. cross-schema FK 허용(Novel의 본질적 속성). |
 | `status` | text | NOT NULL, CHECK ∈ {drafting, published, archived} | |
 | `created_at` | timestamptz | NOT NULL, default now() | UTC |
 | `updated_at` | timestamptz | NOT NULL, default now() | UTC |
@@ -60,6 +61,18 @@ references:
 | `active` | boolean | NOT NULL, default false | |
 | `created_by` | UUID | NOT NULL | admin user id |
 | `created_at` | timestamptz | NOT NULL | UTC |
+
+### `generator.writers`
+회차를 생성하는 작가의 등록 정보. 정체성 본문 자체는 DB가 아닌 파일(generator repo)에 있고, 본 테이블은 *어느 작가가 존재하고 어디서 정체성을 읽어와야 하는가*만 추적한다.
+
+| 컬럼 | 타입 | 키/제약 | 비고 |
+|---|---|---|---|
+| `id` | text | PK | 작가 슬러그 (예: `writer-alpha`). 파일 디렉토리 이름과 일치. 불변. |
+| `identity_path` | text | NOT NULL | generator repo 내 정체성 디렉토리 경로 (예: `writers/writer-alpha/`). 본문(SOUL.md, Literary-Style.md)은 파일. |
+| `active` | boolean | NOT NULL, default true | 비활성 시 새 Novel 배정 불가 |
+| `created_at` | timestamptz | NOT NULL, default now() | UTC |
+
+> **정체성 본문은 DB가 아니다.** SOUL.md / Literary-Style.md의 실제 텍스트는 generator repo의 파일(읽기 전용). DB는 참조 경로와 활성 여부만 가진다. 상세 정책은 §6 참조.
 
 ### `generator.writer_contexts`
 Novel 1:1. 작가의 누적 상태(큰/세부 스토리 설계, 일화, 떡밥, 피드백 로그).
@@ -136,6 +149,7 @@ pd의 검수 결과 1건.
 
 ```
 story_specs (1) ─────────────▶ (N) novels
+writers     (1) ─────────────▶ (N) novels           (작가 1명이 여러 작품; 단 status='drafting'은 동시 1개 — §4.1)
 novels (1) ──────────────────▶ (N) chapters
 novels (1) ──────────────────▶ (1) writer_contexts
 novels (1) ──────────────────▶ (N) episodes
@@ -160,6 +174,12 @@ chapters (1) ────────────────▶ (N) reviews    
     ON public.chapters (novel_id)
     WHERE status IN ('draft', 'in_review');
   ```
+- **한 작가는 동시에 active 소설 1개**: 부분 유니크 인덱스로 Domain Model §4.7을 강제. active 기준은 `Novel.status='drafting'`.
+  ```sql
+  CREATE UNIQUE INDEX novels_one_active_per_writer
+    ON public.novels (writer_id)
+    WHERE status = 'drafting';
+  ```
 - **상태 전이 제약**: enum 차원의 값 제한은 enum이 보장. 허용 전이 그래프(§Domain 4.1)는 애플리케이션 레이어에서 검증(트리거로도 강제 가능 — `[확인 필요]`).
 
 ### 4.2 폴링/조회 최적화 인덱스
@@ -178,8 +198,8 @@ chapters (1) ────────────────▶ (N) reviews    
 
 | 스키마 | 테이블 | 쓰기 권한 |
 |---|---|---|
-| `public` | `novels`, `chapters`, `story_specs` | admin/generator/pd가 정해진 컬럼만 쓰기 (Chapter.status 전이는 §SRS-F의 owner_module이 관할) |
-| `generator` | `writer_contexts`, `episodes`, `foreshadows`, `draft_runs` | generator 전용 쓰기 |
+| `public` | `novels`, `chapters`, `story_specs` | admin/generator/pd가 정해진 컬럼만 쓰기 (Chapter.status 전이는 §SRS-F의 owner_module이 관할). `novels.writer_id`는 Novel 생성 시점에 배정. |
+| `generator` | `writers`, `writer_contexts`, `episodes`, `foreshadows`, `draft_runs` | generator 전용 쓰기. 단 `writers`는 admin이 시드/활성 토글하고 generator는 읽기 전용. |
 | `pd` | `reviews` | pd 전용 쓰기 |
 
 읽기는 어느 서비스에서도 가능. 다른 서비스 스키마에 쓰기를 시도하면 안 된다 (Phase 1 정책).
@@ -193,7 +213,22 @@ chapters (1) ────────────────▶ (N) reviews    
 
 ---
 
-## 6. 마이그레이션 정책
+## 6. 정체성 저장소 (DB 아님)
+
+작가 정체성은 PostgreSQL이 아닌 generator repo의 **파일**로 관리된다. DB는 참조만 가진다.
+
+- **경로 규약**:
+  - `generator-repo/writers/{writer-id}/SOUL.md` — AgentIdentity 부분 (성격·세계관·가치관·영감 책 이름 목록)
+  - `generator-repo/writers/{writer-id}/Literary-Style.md` — 문체·기법
+- **권한**: 사람이 설계·편집. 시스템(generator/pd)은 읽기 전용.
+- **DB와의 관계**: `generator.writers.identity_path`가 위 디렉토리 경로를 가리킨다. 본문이 DB에 복제되지 않으므로 파일을 단일 진실로 본다.
+- **로드 시점**: generator는 회차 생성 사이클에서 `public.novels.writer_id`로 `generator.writers` row를 조회한 뒤 `identity_path`의 두 파일을 읽어 LLM 입력에 포함한다. WriterContext는 별도로 DB에서 읽는다(Domain Model §1 박스 단락 참조).
+- **향후 확장**: `SOUL.md`의 `inspirations`(책 이름 목록)를 RAG로 보강할 수 있으나, 본 명세 범위에서는 책 이름 텍스트만 사용한다. RAG 인덱스가 도입되면 별도 테이블/스키마와 ADR로 명세한다.
+- **본 명세 범위 밖**: SOUL.md / Literary-Style.md의 실제 내용·템플릿(generator repo 작업).
+
+---
+
+## 7. 마이그레이션 정책
 
 - **마이그레이션 도구 선택**: `[확인 필요]` — Alembic / golang-migrate / Prisma migrate 등 후보. 추후 ADR로 결정.
 - **변경 분류**:
