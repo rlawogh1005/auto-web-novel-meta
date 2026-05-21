@@ -39,7 +39,7 @@ references:
 
 **설명**: generator는 활성 StorySpec의 `frequency`에 따라 정해진 주기에 깨어나, 해당 Novel의 WriterContext와 직전까지의 Chapter들을 읽어 Anthropic Claude(WORLD §LLM 호출 규칙)를 호출해 다음 Chapter의 draft 본문을 생성하고 저장한다. 이후 LLM 출력에서 추출 가능한 새 일화/떡밥 정보를 WriterContext에 갱신한다.
 
-**maps_to_prd**: `[PRD 미작성, 임시 placeholder]`
+**maps_to_prd**: `PRD-US-01`
 
 **owner_module**: `MOD-GENERATOR`
 
@@ -59,7 +59,7 @@ references:
 
 **설명**: generator는 자신이 생성한 `status='draft'` Chapter에 대해 Domain Model §4.5의 완성 판정 기준을 적용해 통과 시 `draft → in_review` 상태 전이를 수행한다.
 
-**maps_to_prd**: `[PRD 미작성, 임시 placeholder]`
+**maps_to_prd**: `PRD-US-01`
 
 **owner_module**: `MOD-GENERATOR`
 
@@ -81,7 +81,7 @@ references:
 
 **설명**: pd는 주기적으로 (주기 `[확인 필요]`) `public.chapters`에서 `status='in_review'`인 행을 `updated_at` 오래된 순으로 조회해, 각 Chapter에 대해 LLM 기반 검수를 수행하고 `pd.reviews`에 결과를 기록한다.
 
-**maps_to_prd**: `[PRD 미작성, 임시 placeholder]`
+**maps_to_prd**: `PRD-US-02`
 
 **owner_module**: `MOD-PD`
 
@@ -102,7 +102,7 @@ references:
 - `approve` → Chapter.status를 `in_review → approved`로 전이한 뒤, 즉시 `approved → published`로 자동 전이하고 `published_at`을 기록한다.
 - `reject` 또는 `needs_revision` → Chapter.status를 `in_review → draft`로 되돌리고, Review.feedback을 `generator.writer_contexts.feedback_log`에 누적한다 (Domain §4.6 — 동일 트랜잭션).
 
-**maps_to_prd**: `[PRD 미작성, 임시 placeholder]`
+**maps_to_prd**: `PRD-US-02`
 
 **owner_module**: `MOD-PD`
 
@@ -130,10 +130,10 @@ references:
 
 | PRD-US | SRS-F | Owner Module | 비고 |
 |---|---|---|---|
-| `[PRD 미작성, 임시 placeholder]` | SRS-F-001 | MOD-GENERATOR | 회차 생성 |
-| `[PRD 미작성, 임시 placeholder]` | SRS-F-002 | MOD-GENERATOR | in_review 전환 |
-| `[PRD 미작성, 임시 placeholder]` | SRS-F-003 | MOD-PD | in_review 폴링·검수 |
-| `[PRD 미작성, 임시 placeholder]` | SRS-F-004 | MOD-PD | 검수 결과 상태 전이 |
+| `PRD-US-01` | SRS-F-001 | MOD-GENERATOR | 회차 생성 |
+| `PRD-US-01` | SRS-F-002 | MOD-GENERATOR | in_review 전환 |
+| `PRD-US-02` | SRS-F-003 | MOD-PD | in_review 폴링·검수 |
+| `PRD-US-02` | SRS-F-004 | MOD-PD | 검수 결과 상태 전이 |
 
 > **고지**:
 > - PRD 작성 후 사람이 좌측 컬럼을 실제 `PRD-US-NN`으로 채운다.
