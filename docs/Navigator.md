@@ -12,7 +12,10 @@
 
 | 명세 유형 | 파일 | ID 범위 | 상태 | 최종 갱신 |
 |---|---|---|---|---|
-| _(아직 없음)_ | | | | |
+| Domain Model | [Domain-Model.md](Domain-Model.md) | Novel, Chapter, StorySpec, WriterContext, Foreshadow, Episode, ReviewDecision | 검증 대기 | 2026-05-21 |
+| Data Model | [Data-Model.md](Data-Model.md) | (Domain Model과 동일 엔티티명) + ENUM `chapter_status`, `review_decision` | 검증 대기 | 2026-05-21 |
+| SRS | [SRS.md](SRS.md) | SRS-F-001 ~ SRS-F-004 | 검증 대기 | 2026-05-21 |
+| Sequence / Flow | [Flow-Chapter-Lifecycle.md](Flow-Chapter-Lifecycle.md) | FLOW-CHAPTER-LIFECYCLE | 검증 대기 | 2026-05-21 |
 
 상태 값: `식별됨` → `작성 중` → `검증 대기` → `확정`
 
@@ -22,9 +25,20 @@
 
 > 이 프로젝트에 **필요하다고 식별된** 명세 유형과 근거. 작성 전에 여기 먼저 기록하고 승인받는다.
 
+이번 작업의 식별 범위는 **"회차 생성 → 검수" 줄기에 한정**한다. 다른 줄기(viewer, admin UI, 사용자 댓글)에 필요한 명세는 별도 식별 작업에서 다룬다.
+
 | 명세 유형 | 필요 판단 근거 (트리거) | 우선순위 | 작성 여부 |
 |---|---|---|---|
-| _(미식별)_ | | | |
+| Domain Model | "작가" 누적 컨텍스트 + Chapter 상태기계 등 도메인 규칙 다수 → 모델링 없이는 일관성 보장 불가 | 최우선 | ✅ |
+| Data Model | 영속 데이터(PostgreSQL)가 존재 → Master §6 트리거 자동 충족 | 최우선 | ✅ |
+| SRS | 구현해야 할 기능(생성·검수 사이클)이 정의됨 | 최우선 | ✅ |
+| Sequence / Flow | generator ↔ DB ↔ pd 다단계 상호작용이 글로 설명하기 어려움 | 우선 | ✅ |
+| PRD / North Star | 사람 이해관계자(사용자·운영자) 존재 → 필요하나 본 작업에서는 사람이 작성할 영역 | 후순위 | ❌ (사람 작성 대기) |
+| Module Map | SRS-F의 `owner_module`이 `MOD-GENERATOR`, `MOD-PD`를 인용 → 곧 필요 | 다음 작업 | ❌ |
+| ADR | 마이그레이션 도구, FOR UPDATE 락 전략, pd→writer_contexts 직접 쓰기 정책 등 결정 미정 | 결정 시 | ❌ |
+| API Contract | Phase 1에서 서비스 간 HTTP 호출 없음 (상태기계로 통신) → 본 줄기에서는 불필요 | 보류 | ❌ |
+| Glossary | 본 명세 내 엔티티명이 Domain Model에서 통제되어 우선 충분 | 보류 | ❌ |
+| Constraints / NFR | 성능·보안·가용성 요구는 본 줄기 범위 밖 | 별도 작업 | ❌ |
 
 ---
 
@@ -32,16 +46,19 @@
 
 > 마지막 검증 시점 기준. 위반이 있으면 여기 기록.
 
-- [ ] 고아 SRS 없음 (모든 SRS-F가 PRD 근거를 가짐)
-- [ ] 미구현 PRD 없음 (모든 PRD-US가 SRS로 이어짐)
-- [ ] 미할당 SRS-F 없음 (각 SRS-F가 1개 모듈에 할당)
-- [ ] 의존 그래프 DAG (순환 없음)
-- [ ] 모든 ADR이 Constraint/SRS 인용
-- [ ] 모든 API Contract가 구현 모듈 보유
+| 항목 | 상태 | 비고 |
+|---|---|---|
+| 고아 SRS 없음 (모든 SRS-F가 PRD 근거를 가짐) | ⚠️ 의도된 보류 | PRD 미작성으로 모든 SRS-F의 `maps_to_prd`가 placeholder. PRD 작성 시 사람이 채우면 해소. |
+| 미구현 PRD 없음 (모든 PRD-US가 SRS로 이어짐) | N/A | PRD 미작성. |
+| 미할당 SRS-F 없음 (각 SRS-F가 1개 모듈에 할당) | ⚠️ 의도된 보류 | SRS는 `MOD-GENERATOR`, `MOD-PD`를 owner_module로 선언했으나 Module Map은 아직 미작성. Module Map 작성 시 정식 통과. |
+| 의존 그래프 DAG (순환 없음) | N/A | Module Map 미작성. |
+| 모든 ADR이 Constraint/SRS 인용 | N/A | ADR 미작성. |
+| 모든 API Contract가 구현 모듈 보유 | N/A | API Contract 없음(Phase 1). |
 
-마지막 검증: _(없음)_
+마지막 검증: 2026-05-21
 
 ---
 
 ## 변경 이력
-- _(없음)_
+
+- 2026-05-21: 회차 생성→검수 줄기 명세 4건 신규 작성 — Domain Model, Data Model, SRS (SRS-F-001~004), Sequence/Flow (`FLOW-CHAPTER-LIFECYCLE`). Navigator 인덱스/식별 결과/추적 체크 동시 갱신.
