@@ -48,7 +48,7 @@
 
 | 항목 | 상태 | 비고 |
 |---|---|---|
-| 고아 SRS 없음 (모든 SRS-F가 PRD 근거를 가짐) | ⚠️ 의도된 보류 | PRD 미작성으로 모든 SRS-F의 `maps_to_prd`가 placeholder. PRD 작성 시 사람이 채우면 해소. |
+| 고아 SRS 없음 (모든 SRS-F가 PRD 근거를 가짐) | ✅ | SRS-F-001/002 → PRD-US-01, SRS-F-003/004 → PRD-US-02 매핑 완료. |
 | 미구현 PRD 없음 (모든 PRD-US가 SRS로 이어짐) | N/A | PRD 미작성. |
 | 미할당 SRS-F 없음 (각 SRS-F가 1개 모듈에 할당) | ⚠️ 의도된 보류 | SRS는 `MOD-GENERATOR`, `MOD-PD`를 owner_module로 선언했으나 Module Map은 아직 미작성. Module Map 작성 시 정식 통과. |
 | 의존 그래프 DAG (순환 없음) | N/A | Module Map 미작성. |
@@ -69,5 +69,6 @@
 
 ## 변경 이력
 
+- 2026-05-21: DB walking skeleton 1a — Data-Model.md → 실제 PostgreSQL 컨테이너 구현 (`docker-compose.yml`, `db/schema.sql`, `db/README.md`). 마이그레이션 도구·GRANT 권한 분리·updated_at/published_at/status 전이 트리거는 모두 `[확인 필요]`로 유지. UUID PK 기본값(DEFAULT)도 명세 외 → 미추가. 본 변경은 docs/ 명세 자체에는 새 항목을 추가하지 않음.
 - 2026-05-21: 회차 생성→검수 줄기 명세 4건 신규 작성 — Domain Model, Data Model, SRS (SRS-F-001~004), Sequence/Flow (`FLOW-CHAPTER-LIFECYCLE`). Navigator 인덱스/식별 결과/추적 체크 동시 갱신.
 - 2026-05-21: 고도화된 작가 개념 확장 — Domain Model에 `Writer` 엔티티, `AgentIdentity`/`WriterIdentity` 값 객체, §4.7 Writer↔Novel 1:N + 동시 active 1개 불변식, Aggregate "Novel" 외부 참조 항목, WriterContext의 정체성↔누적상태 구분 박스 추가. Data Model에 `generator.writers` 테이블, `public.novels.writer_id`, `novels_one_active_per_writer` 부분 유니크 인덱스, §6 정체성 저장소(파일) 절 추가(기존 §6 마이그레이션은 §7로 이동). ReaderIdentity는 개념만 언급(viewer 줄기 대기). Navigator에 Novel 연재 생명주기 미작성을 기술 빚으로 기록.
