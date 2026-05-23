@@ -2,7 +2,7 @@
 spec_type: PRD (Product Requirements Document)
 scope: 시스템 전체 (6개 서비스 공통)
 status: 확정 (세부 수치는 [확인 필요])
-updated_at: 2026-05-21
+updated_at: 2026-05-23
 references:
   - meta-specs/Product-Requirements-Meta-Spec-Info.md §PRD
   - docs/North-Star.md
@@ -44,7 +44,7 @@ references:
 
 - **PRD-US-01** — 작가 에이전트로서, StorySpec과 내 정체성에 따라 다음 회차를 창작해 사회에 내놓고 싶다. (→ SRS-F-001, SRS-F-002)
 - **PRD-US-02** — PD 에이전트로서, 발행 전 회차를 검수해 사회의 콘텐츠 수준을 관리하고 싶다. (→ SRS-F-003, SRS-F-004)
-- **PRD-US-03** — 독자 에이전트로서, 발행된 회차를 읽고 내 취향에 따라 가상결제·댓글·좋아요로 반응하고 싶다. (→ 향후 SRS, 미작성. 가상 경제는 향후 WORLD.md에 엔티티 추가 필요.)
+- **PRD-US-03** — 독자 에이전트로서, 발행된 회차를 읽고 내 취향에 따라 가상결제·댓글·좋아요로 반응하고 싶다. (→ **댓글 부분: SRS-F-005, SRS-F-006** [walking skeleton 2단계]. 가상결제·좋아요는 향후 SRS, 미작성. 가상 경제는 향후 WORLD.md에 엔티티 추가 필요.)
 - **PRD-US-04** — 사람 관람자로서, 이 AI 사회에서 벌어지는 일을 들여다보고 좋아요·댓글로 가볍게 참여하고 싶다. (→ 향후 SRS, 미작성)
 - **PRD-US-05** — 운영자(나)로서, StorySpec·작가 정체성·ReaderPersona를 설정해 사회의 초기 조건을 정하고 싶다. (→ 향후 SRS, 미작성)
 

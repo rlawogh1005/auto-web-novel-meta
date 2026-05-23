@@ -1,32 +1,39 @@
 ---
 spec_type: SRS (Software Requirements Specification)
-scope: 회차 생성 → 검수 줄기 (다른 줄기 범위 밖)
+scope: 회차 생성·검수 줄기 + AI 독자 댓글 줄기 (사람 UI·가상결제·좋아요는 범위 밖)
 status: 검증 대기
-updated_at: 2026-05-21
+updated_at: 2026-05-23
 references:
   - meta-specs/Product-Requirements-Meta-Spec-Info.md §SRS
   - docs/Domain-Model.md
   - docs/Data-Model.md
   - docs/Flow-Chapter-Lifecycle.md
+  - docs/Flow-AI-Reader-Comment.md
 ---
 
-# SRS — 회차 생성·검수 줄기
+# SRS — 회차 생성·검수 + AI 독자 댓글 줄기
 
-> 이 문서는 회차 1건이 generator에서 생성되어 pd 검수를 거쳐 published 되거나 다시 draft로 돌아가는 한 줄기의 기능 요구를 명세한다.
-> NFR(성능·보안·가용성)과 다른 줄기(viewer, admin UI, 사용자 댓글)는 본 명세 범위 밖이다.
+> 이 문서는 두 줄기의 기능 요구를 명세한다.
+> 1. **회차 줄기 (walking skeleton 1단계)** — 회차 1건이 generator에서 생성되어 pd 검수를 거쳐 published 되거나 다시 draft로 돌아간다.
+> 2. **AI 독자 댓글 줄기 (walking skeleton 2단계)** — published 회차에 AI 독자(reader-agent)가 댓글을 단다.
+>
+> NFR(성능·보안·가용성)과 다른 줄기(사람 UI 좋아요/댓글, 독자 가상결제)는 본 명세 범위 밖이다.
 
-> **PRD 미작성 안내**: 본 시점에 PRD/North Star가 아직 작성되지 않았다. 모든 SRS-F의 `maps_to_prd` 필드는 `[PRD 미작성, 임시 placeholder]`로 표기하며, PRD가 작성되는 시점에 사람이 실제 `PRD-US-NN`으로 채운다. Master §4 "고아 SRS 금지" 검증은 그때까지 보류된다 (Navigator.md 추적 무결성 체크 참조).
+> **PRD-US 매핑 안내**: SRS-F-001~004는 PRD-US-01/02 (작가·PD)에 매핑된다. SRS-F-005~006은 PRD-US-03 (독자) 중 **댓글 부분**에만 매핑된다 — 가상결제·좋아요는 향후 SRS, 미작성.
 
 ---
 
 ## 1. 범위
 
-**대상**: `StorySpec → generator의 다음 회차 생성 → in_review 전환 → pd 검수 → 상태 전환` 의 흐름. 관련 엔티티는 [Domain-Model.md](Domain-Model.md), 스키마는 [Data-Model.md](Data-Model.md), 시퀀스는 [Flow-Chapter-Lifecycle.md](Flow-Chapter-Lifecycle.md) 참조.
+**대상 — 회차 줄기**: `StorySpec → generator의 다음 회차 생성 → in_review 전환 → pd 검수 → 상태 전환` 의 흐름. 관련 엔티티는 [Domain-Model.md](Domain-Model.md), 스키마는 [Data-Model.md](Data-Model.md), 시퀀스는 [Flow-Chapter-Lifecycle.md](Flow-Chapter-Lifecycle.md) 참조.
+
+**대상 — AI 독자 댓글 줄기**: `published Chapter → viewer의 폴링 → reader-agent의 LLM 댓글 생성 → viewer.comments INSERT` 의 흐름. 시퀀스는 [Flow-AI-Reader-Comment.md](Flow-AI-Reader-Comment.md) 참조.
 
 **범위 밖**:
 - StorySpec/ReaderPersona의 작성·관리 (admin 줄기).
-- 발행된 회차의 노출 (viewer/web-app/mobile-app).
-- reader-agents의 읽기·댓글 생성.
+- 사람 사용자의 발행 회차 노출(viewer 웹 API·web-app·mobile-app UI).
+- 사람 사용자의 좋아요·댓글 (3단계+).
+- AI 독자의 가상결제·좋아요 (3단계+).
 - 인증·과금·운영 모니터링 등 NFR.
 
 ---
@@ -120,6 +127,48 @@ references:
 
 ---
 
+### SRS-F-005 — viewer의 published 회차 폴링·읽기
+
+**설명**: viewer는 주기적으로 (주기 `[확인 필요]`) `public.chapters`에서 `status='published'` 인 행을 조회해, 활성 ReaderPersona 각각에 대해 "아직 댓글을 달지 않은 published chapter" 조합을 식별한다. `public.chapters` 는 viewer에게 **읽기 전용**이다.
+
+**maps_to_prd**: `PRD-US-03` (댓글 부분 슬라이스 — 가상결제·좋아요는 본 SRS 범위 밖)
+
+**owner_module**: `MOD-VIEWER`
+
+**acceptance**:
+- Given: `public.chapters`에 `status='published'` 인 row가 1개 이상 존재하고, `viewer.reader_personas`에 `active=true` 인 페르소나가 1명 이상 존재한다.
+- When: viewer의 폴링 cycle이 실행된다.
+- Then:
+  1. viewer는 active persona × `published` chapter 조합 중 `viewer.comments`에 `(chapter_id, author_persona_id)` row가 없는 조합을 후보로 식별한다.
+  2. 후보 발견 시 SRS-F-006의 댓글 생성으로 이어진다.
+  3. 후보 없음이면 cycle을 종료한다.
+- 실패 케이스: DB 조회 실패 시 cycle을 중단하고 다음 cycle에서 다시 시도한다 (특별한 상태 변경 없음).
+
+---
+
+### SRS-F-006 — reader-agent의 댓글 생성
+
+**설명**: viewer는 SRS-F-005가 식별한 `(persona, chapter)` 조합 각각에 대해 persona의 ReaderIdentity 파일 3개(SOUL.md / Reading-Style.md / Comment-Style.md)와 Chapter.content를 LLM(WORLD §LLM 호출 규칙)에 입력해 댓글 본문을 생성한다. 결과는 같은 트랜잭션에서 `viewer.comments` 와 `viewer.comment_runs` 에 INSERT 된다.
+
+**maps_to_prd**: `PRD-US-03` (댓글 부분 슬라이스 — 가상결제·좋아요는 본 SRS 범위 밖)
+
+**owner_module**: `MOD-VIEWER`
+
+**acceptance**:
+- Given: SRS-F-005가 식별한 `(persona, chapter)` 후보가 1건 이상 존재한다.
+- When: viewer가 댓글 생성 동작을 수행한다.
+- Then:
+  1. 후보 각각에 대해 LLM 호출이 일어나고 결과 댓글 본문이 만들어진다.
+  2. 동일 트랜잭션 안에서 다음이 모두 일어난다:
+     - `viewer.comments(id, chapter_id, author_persona_id, content)` row 1건 INSERT.
+     - `viewer.comment_runs(id, comment_id, persona_id, viewer_version, llm_metadata)` row 1건 INSERT.
+     - 어느 한 작업이 실패하면 전체 롤백.
+  3. `UNIQUE (chapter_id, author_persona_id)` (Data §1) 위반은 거부된다 — 두 viewer 인스턴스의 동시 폴링 충돌을 자연 직렬화한다 (Domain §4.9).
+  4. `Chapter.status='published'` 가 아닌 회차에 대한 INSERT는 거부된다 (Domain §4.8).
+- 실패 케이스: LLM 호출 실패 시 해당 `(persona, chapter)` 조합에 대해 `comments`/`comment_runs` 모두 생성하지 않는다 — 다음 cycle에서 다시 후보가 된다. 실패 메타 별도 보관 여부는 `[확인 필요]`.
+
+---
+
 ## 3. 비기능 요구사항
 
 본 줄기 범위 밖. 추후 SRS-N 형태로 별도 명세. (성능: 폴링 주기·생성 빈도 / 보안: 서비스 간 권한 / 가용성: 재시도·중단 복구 등)
@@ -134,7 +183,9 @@ references:
 | `PRD-US-01` | SRS-F-002 | MOD-GENERATOR | in_review 전환 |
 | `PRD-US-02` | SRS-F-003 | MOD-PD | in_review 폴링·검수 |
 | `PRD-US-02` | SRS-F-004 | MOD-PD | 검수 결과 상태 전이 |
+| `PRD-US-03` (댓글 슬라이스) | SRS-F-005 | MOD-VIEWER | published 폴링·후보 식별 |
+| `PRD-US-03` (댓글 슬라이스) | SRS-F-006 | MOD-VIEWER | reader-agent 댓글 생성 |
 
 > **고지**:
-> - PRD 작성 후 사람이 좌측 컬럼을 실제 `PRD-US-NN`으로 채운다.
-> - Module 컬럼의 `MOD-GENERATOR`, `MOD-PD`는 이 SRS에서 이름만 선언한 것이며, Module Map은 별도 명세로 작성될 예정이다. Master §4 "미할당 SRS-F 없음" 검증은 Module Map 작성 시점에 정식 통과한다.
+> - `PRD-US-03` 은 본디 "독자 에이전트가 발행 회차에 가상결제·댓글·좋아요로 반응" 전체를 다룬다. 본 SRS의 SRS-F-005/006 은 그 중 **댓글 부분 슬라이스**만 매핑한다. 가상결제·좋아요는 향후 SRS, 미작성.
+> - Module 컬럼의 `MOD-GENERATOR`, `MOD-PD`, `MOD-VIEWER` 는 이 SRS에서 이름만 선언한 것이며, Module Map은 별도 명세로 작성될 예정이다. Master §4 "미할당 SRS-F 없음" 검증은 Module Map 작성 시점에 정식 통과한다.

@@ -1,15 +1,15 @@
 ---
 spec_type: Data Model / Schema
-scope: 회차 생성 → 검수 줄기 (다른 줄기 범위 밖)
+scope: 회차 생성·검수 줄기 + AI 독자 댓글 줄기 (사람 UI·가상결제·좋아요는 범위 밖)
 status: 검증 대기
-updated_at: 2026-05-21
+updated_at: 2026-05-23
 references:
   - meta-specs/Architecture-Design-Meta-Spec-Info.md §Data Model
   - WORLD.md §핵심 엔티티, §공통 규칙
   - docs/Domain-Model.md
 ---
 
-# Data Model — 회차 생성·검수 줄기
+# Data Model — 회차 생성·검수 + AI 독자 댓글 줄기
 
 > 이 문서는 [docs/Domain-Model.md](Domain-Model.md) 의 엔티티를 PostgreSQL 스키마로 구현한 결과를 명세한다.
 > 엔티티명은 Domain Model과 1:1로 대응한다(같은 이름은 같은 개념).
@@ -135,6 +135,49 @@ pd의 검수 결과 1건.
 | `feedback` | text | NOT NULL, default '' | |
 | `created_at` | timestamptz | NOT NULL | UTC |
 
+### `viewer.reader_personas`
+AI 독자(reader-agent)의 등록 정보. 정체성 본문은 DB가 아닌 파일(viewer repo)에 있고, 본 테이블은 *어느 페르소나가 존재하고 어디서 정체성을 읽어와야 하는가*만 추적한다. `generator.writers`와 완전 대칭.
+
+| 컬럼 | 타입 | 키/제약 | 비고 |
+|---|---|---|---|
+| `id` | text | PK | 페르소나 슬러그 (예: `reader-alpha`). 파일 디렉토리 이름과 일치. 불변. |
+| `identity_path` | text | NOT NULL | viewer repo 내 정체성 디렉토리 경로 (예: `readers/reader-alpha/`). 본문(SOUL.md, Reading-Style.md, Comment-Style.md)은 파일. |
+| `active` | boolean | NOT NULL, default true | 비활성 시 새 댓글 생성 대상에서 제외 |
+| `created_at` | timestamptz | NOT NULL, default now() | UTC |
+
+> **정체성 본문은 DB가 아니다.** SOUL.md / Reading-Style.md / Comment-Style.md의 실제 텍스트는 viewer repo의 파일(읽기 전용). DB는 참조 경로와 활성 여부만 가진다. 상세 정책은 §6 참조.
+
+### `viewer.comments`
+한 ReaderPersona가 한 published Chapter에 단 댓글 1건.
+
+| 컬럼 | 타입 | 키/제약 | 비고 |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `chapter_id` | UUID | NOT NULL, FK → `public.chapters(id)` ON DELETE CASCADE | published만 허용 — 강제 위치는 트리거 또는 애플리케이션 (`[확인 필요]`, Domain §4.8) |
+| `author_persona_id` | text | NULL, FK → `viewer.reader_personas(id)` ON DELETE RESTRICT | 사람 댓글(NULL) 호환 위해 nullable. 본 줄기(AI 독자 댓글) INSERT는 항상 NOT NULL로 채움 — WORLD.md `Comment.persona_id` 정의 보존 |
+| `content` | text | NOT NULL | 댓글 본문 |
+| `created_at` | timestamptz | NOT NULL, default now() | UTC |
+
+**유니크 제약**:
+```sql
+CREATE UNIQUE INDEX comments_one_per_persona_per_chapter
+  ON viewer.comments (chapter_id, author_persona_id)
+  WHERE author_persona_id IS NOT NULL;
+```
+Domain Model §4.9 강제. `WHERE author_persona_id IS NOT NULL` 부분 인덱스이므로 사람 댓글(NULL)에는 제약이 걸리지 않는다 — 본 줄기 범위에서 충분.
+
+### `viewer.comment_runs`
+viewer의 LLM 호출 1회분 메타데이터. `generator.draft_runs` / `pd.reviews` 패턴과 동일.
+
+| 컬럼 | 타입 | 키/제약 | 비고 |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `comment_id` | UUID | FK → `viewer.comments(id)` ON DELETE CASCADE | 실패 호출의 경우 NULL 허용 여부 `[확인 필요]`. 본 명세 기본은 NOT NULL — 실패 시 comment row를 만들지 않고 comment_runs도 만들지 않거나, 실패 전용 별도 컬럼/테이블로 표시. |
+| `persona_id` | text | NOT NULL, FK → `viewer.reader_personas(id)` | |
+| `viewer_version` | text | NOT NULL | |
+| `llm_metadata` | jsonb | NOT NULL | 모델/토큰/소요시간/seed 등 |
+| `created_at` | timestamptz | NOT NULL | UTC |
+
 ---
 
 ## 2. ENUM 정의
@@ -156,6 +199,9 @@ novels (1) ──────────────────▶ (N) episode
 novels (1) ──────────────────▶ (N) foreshadows
 chapters (1) ────────────────▶ (N) draft_runs
 chapters (1) ────────────────▶ (N) reviews          (재검수 가능하므로 1:N)
+chapters (1) ────────────────▶ (N) comments        (published 회차에 ReaderPersona가 댓글; 1 persona × 1 chapter = 1 — §4.1)
+reader_personas (1) ─────────▶ (N) comments
+comments (1) ────────────────▶ (1) comment_runs    (LLM 호출 메타 1:1)
 ```
 
 - 모든 자식 테이블은 부모 Novel 또는 Chapter의 삭제 시 CASCADE.
@@ -181,16 +227,21 @@ chapters (1) ────────────────▶ (N) reviews    
     WHERE status = 'drafting';
   ```
 - **상태 전이 제약**: enum 차원의 값 제한은 enum이 보장. 허용 전이 그래프(§Domain 4.1)는 애플리케이션 레이어에서 검증(트리거로도 강제 가능 — `[확인 필요]`).
+- **댓글 대상 published 제약** (Domain §4.8): `viewer.comments` INSERT 시 `public.chapters.status='published'` 인지 검증. 트리거(예: `BEFORE INSERT ON viewer.comments`) 또는 애플리케이션 레이어 (`[확인 필요]` — 트리거 비용 vs 보장 강도).
+- **1 ReaderPersona × 1 Chapter = 1 Comment** (Domain §4.9): 위 §1 `comments_one_per_persona_per_chapter` 부분 유니크 인덱스가 NOT NULL 케이스에서 강제. 사람 댓글(NULL)은 제외.
 
 ### 4.2 폴링/조회 최적화 인덱스
 
 - **pd 폴링**: `INDEX (status, updated_at) ON public.chapters` — pd가 `WHERE status='in_review' ORDER BY updated_at` 쿼리를 효율적으로 수행하기 위함 (SRS-F-003).
+- **viewer 폴링**: `INDEX (status, published_at) ON public.chapters` — viewer가 `WHERE status='published'` 회차를 효율적으로 조회하기 위함 (SRS-F-005). 신규 published를 시간순으로 훑거나 `published_at > $cursor` 페이지네이션에 사용.
+- **comments 검색**: `INDEX (chapter_id, created_at) ON viewer.comments` — 특정 회차의 댓글 시간순 조회.
 - **generator 다음 번호 조회**: `INDEX (novel_id, number) ON public.chapters` (위 UNIQUE 인덱스가 동일 효과를 가짐).
 
 ### 4.3 동시성
 
 - **WriterContext 낙관적 잠금**: 갱신 시 `WHERE novel_id = $1 AND version = $2` 조건으로 UPDATE, 영향 행 수 0이면 재시도. Domain Model §4.4.
 - **Chapter 상태 전이 동시성**: `SELECT ... FOR UPDATE`를 status 전이 직전에 사용해 동시 전이 충돌 방지 (pd 폴링이 같은 in_review row를 두 번 집어들지 않도록 — `[확인 필요]` 구현은 `FOR UPDATE SKIP LOCKED` 등으로).
+- **viewer 댓글 생성 동시성**: 두 viewer 인스턴스가 동시에 같은 `(persona, chapter)` 후보를 잡았을 때 `comments_one_per_persona_per_chapter` 부분 유니크 인덱스가 두 번째 INSERT를 거부한다 (자연 직렬화). 명시적 행 락이 더 나은지는 `[확인 필요]`.
 
 ---
 
@@ -198,11 +249,14 @@ chapters (1) ────────────────▶ (N) reviews    
 
 | 스키마 | 테이블 | 쓰기 권한 |
 |---|---|---|
-| `public` | `novels`, `chapters`, `story_specs` | admin/generator/pd가 정해진 컬럼만 쓰기 (Chapter.status 전이는 §SRS-F의 owner_module이 관할). `novels.writer_id`는 Novel 생성 시점에 배정. |
+| `public` | `novels`, `chapters`, `story_specs` | admin/generator/pd가 정해진 컬럼만 쓰기 (Chapter.status 전이는 §SRS-F의 owner_module이 관할). `novels.writer_id`는 Novel 생성 시점에 배정. viewer는 `public.chapters` **읽기 전용** (SRS-F-005). |
 | `generator` | `writers`, `writer_contexts`, `episodes`, `foreshadows`, `draft_runs` | generator 전용 쓰기. 단 `writers`는 admin이 시드/활성 토글하고 generator는 읽기 전용. |
 | `pd` | `reviews` | pd 전용 쓰기 |
+| `viewer` | `reader_personas`, `comments`, `comment_runs` | viewer 전용 쓰기. 단 `reader_personas`는 admin이 시드/활성 토글하고 viewer는 읽기 전용 (`writers`와 동일 패턴). |
 
 읽기는 어느 서비스에서도 가능. 다른 서비스 스키마에 쓰기를 시도하면 안 된다 (Phase 1 정책).
+
+viewer는 SQLAlchemy로 `public.chapters`(읽기) + `viewer.*`(쓰기)에 직접 접근한다.
 
 특수 케이스:
 - **Chapter.status 전이**: status 컬럼은 `public`에 있으나 쓰기 권한이 두 서비스에 걸쳐 있다. SRS-F-002는 generator, SRS-F-003/004는 pd가 수행한다. 권한 분리는 DB 레벨 GRANT 또는 애플리케이션 레벨 정책으로 강제 (`[확인 필요]`).
@@ -215,7 +269,9 @@ chapters (1) ────────────────▶ (N) reviews    
 
 ## 6. 정체성 저장소 (DB 아님)
 
-작가 정체성은 PostgreSQL이 아닌 generator repo의 **파일**로 관리된다. DB는 참조만 가진다.
+에이전트 정체성(작가·독자)은 PostgreSQL이 아닌 각 서비스 repo의 **파일**로 관리된다. DB는 참조만 가진다.
+
+### 6.1 작가 정체성 (generator repo)
 
 - **경로 규약**:
   - `generator-repo/writers/{writer-id}/SOUL.md` — AgentIdentity 부분 (성격·세계관·가치관·영감 책 이름 목록)
@@ -225,6 +281,17 @@ chapters (1) ────────────────▶ (N) reviews    
 - **로드 시점**: generator는 회차 생성 사이클에서 `public.novels.writer_id`로 `generator.writers` row를 조회한 뒤 `identity_path`의 두 파일을 읽어 LLM 입력에 포함한다. WriterContext는 별도로 DB에서 읽는다(Domain Model §1 박스 단락 참조).
 - **향후 확장**: `SOUL.md`의 `inspirations`(책 이름 목록)를 RAG로 보강할 수 있으나, 본 명세 범위에서는 책 이름 텍스트만 사용한다. RAG 인덱스가 도입되면 별도 테이블/스키마와 ADR로 명세한다.
 - **본 명세 범위 밖**: SOUL.md / Literary-Style.md의 실제 내용·템플릿(generator repo 작업).
+
+### 6.2 독자 정체성 (viewer repo)
+
+- **경로 규약**:
+  - `viewer-repo/readers/{reader-id}/SOUL.md` — AgentIdentity 부분 (성격·세계관·가치관·영감 책 이름 목록)
+  - `viewer-repo/readers/{reader-id}/Reading-Style.md` — 무엇에 어떻게 반응하는지
+  - `viewer-repo/readers/{reader-id}/Comment-Style.md` — 댓글 어조·길이
+- **권한**: 사람이 설계·편집. 시스템(viewer)은 읽기 전용.
+- **DB와의 관계**: `viewer.reader_personas.identity_path`가 위 디렉토리 경로를 가리킨다. 본문이 DB에 복제되지 않으므로 파일을 단일 진실로 본다.
+- **로드 시점**: viewer는 댓글 생성 사이클(SRS-F-006)에서 `viewer.reader_personas` row를 조회한 뒤 `identity_path`의 파일 3개를 읽어 LLM 입력에 포함한다.
+- **본 명세 범위 밖**: SOUL.md / Reading-Style.md / Comment-Style.md의 실제 내용·템플릿(viewer repo 작업).
 
 ---
 
