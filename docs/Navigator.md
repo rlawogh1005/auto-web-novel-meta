@@ -64,11 +64,18 @@
 > 본 명세 줄기에서 다루지 않지만, 차후 별도 명세 작업에서 해소해야 하는 항목.
 
 - **Novel 연재 생명주기 명세 미작성** — 현재 `Novel.status`는 `drafting → published → archived` 단순 모델이라 *발행 후에도 연재 지속(published + 작가 active 유지)* 같은 웹소설 연재 구조를 아직 다루지 못한다. Domain Model §4.7의 "active = `Novel.status='drafting'`" 단일 기준도 이 미작성에 의존한다. **회차 줄기 완료 후 Novel 상태기계 별도 명세에서 다룬다.**
+- **회차 "완성" 판정 기준 미정** — generator 구현에서 `MIN_CHAPTER_LENGTH=1000`자를 임시 컷오프로 사용 중이나 정식 기준이 없다 (분량·서사 단위·작가 의도 중 무엇으로 판단할지 미결). 결과적으로 `generate-next`가 자주 미달해 추가 호출이 필요. **SRS-F-001 "회차 완성" 정의 보완 작업에서 다룬다.**
+- **통합 테스트가 개발용 DB를 직접 TRUNCATE** — 현재 통합 테스트가 개발용 PostgreSQL(5433)에 붙어 `TRUNCATE`를 실행해 개발 데이터가 함께 삭제됨. **테스트용 DB 분리(또는 컨테이너 격리) 필요** — Data Model 환경 절 또는 ADR 후보.
+- **approve 전이가 in_review→published 직행** — Domain Model §4.1 상태기계는 `approved` 중간 상태를 거치도록 정의하나 1c 구현은 walking skeleton 압축을 위해 생략하고 곧장 `published`로 전이. **명세-구현 정합성 정리 필요** (Domain 단순화 vs 구현 정상화 중 결정).
+- **pd가 `generator.writer_contexts`에 직접 쓰기 (cross-schema write)** — 식별 결과 §38에 ADR 후보로 적힌 "pd→writer_contexts 직접 쓰기 정책"이 구현되었으나 ADR 미작성. **결정 근거·대안(이벤트, generator 호출) 문서화 필요.**
+- **viewer / reader / 경제 명세 부재** — 본 줄기는 generator·pd만 다룬다. 발행된 회차의 노출·독자 모델·결제/구독은 walking skeleton 2단계에서 식별·작성.
 
 ---
 
 ## 변경 이력
 
+- 2026-05-21: walking skeleton 1c 완성 — pd가 `in_review` 회차를 OpenAI로 검수해 `published`/`draft` 전이 (SRS-F-003/004). generator(1b)→pd(1c) 절반 시뮬레이터 자동 작동 확인 (실 OpenAI smoke: "강호의 문을 열다" 회차 approve 88점 → `published`).
+- 2026-05-21: 구현 진행 — walking skeleton 1a(DB)·1b(generator)·1c(pd) 모두 구현 완료. "명세 → 코드 재현" 줄기는 회차 생성·검수 한정으로 동작.
 - 2026-05-21: LLM 공급자 제약 완화 — Claude 고정 → 교체 가능(기본 OpenAI), 비용 사유.
 - 2026-05-21: DB walking skeleton 1a — Data-Model.md → 실제 PostgreSQL 컨테이너 구현 (`docker-compose.yml`, `db/schema.sql`, `db/README.md`). 마이그레이션 도구·GRANT 권한 분리·updated_at/published_at/status 전이 트리거는 모두 `[확인 필요]`로 유지. UUID PK 기본값(DEFAULT)도 명세 외 → 미추가. 본 변경은 docs/ 명세 자체에는 새 항목을 추가하지 않음.
 - 2026-05-21: 회차 생성→검수 줄기 명세 4건 신규 작성 — Domain Model, Data Model, SRS (SRS-F-001~004), Sequence/Flow (`FLOW-CHAPTER-LIFECYCLE`). Navigator 인덱스/식별 결과/추적 체크 동시 갱신.
