@@ -145,6 +145,56 @@ CREATE TABLE pd.reviews (
   created_at    timestamptz     NOT NULL DEFAULT now()
 );
 
+-- ------------------------------------------------------------
+-- 8. viewer (AI 독자 댓글 줄기 walking skeleton 2단계)
+--    Source: docs/Data-Model.md §1 (viewer.*), §4.1/§4.2 (2026-05-23)
+--    Idempotent: 떠있는 DB에 재적용 가능 (IF NOT EXISTS)
+-- ------------------------------------------------------------
+
+CREATE SCHEMA IF NOT EXISTS viewer;
+
+-- FK 부모. generator.writers 와 대칭 (Data-Model §1, §6.2).
+CREATE TABLE IF NOT EXISTS viewer.reader_personas (
+  id            text        PRIMARY KEY,
+  identity_path text        NOT NULL,
+  active        boolean     NOT NULL DEFAULT true,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+-- 1 ReaderPersona × 1 published Chapter = 1 Comment (Domain §4.9).
+-- author_persona_id 는 사람 댓글(NULL) 호환을 위해 nullable (Data-Model §1).
+CREATE TABLE IF NOT EXISTS viewer.comments (
+  id                uuid        PRIMARY KEY,
+  chapter_id        uuid        NOT NULL REFERENCES public.chapters(id) ON DELETE CASCADE,
+  author_persona_id text        NULL REFERENCES viewer.reader_personas(id) ON DELETE RESTRICT,
+  content           text        NOT NULL,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+-- §4.1: 1 persona × 1 chapter = 1 comment, 사람 댓글(NULL)은 제외.
+CREATE UNIQUE INDEX IF NOT EXISTS comments_one_per_persona_per_chapter
+  ON viewer.comments (chapter_id, author_persona_id)
+  WHERE author_persona_id IS NOT NULL;
+
+-- §4.2: 회차별 댓글 시간순 조회.
+CREATE INDEX IF NOT EXISTS comments_chapter_id_created_at_idx
+  ON viewer.comments (chapter_id, created_at);
+
+-- viewer 의 LLM 호출 1회분 메타. draft_runs/reviews 패턴.
+CREATE TABLE IF NOT EXISTS viewer.comment_runs (
+  id             uuid        PRIMARY KEY,
+  comment_id     uuid        NOT NULL REFERENCES viewer.comments(id) ON DELETE CASCADE,
+  persona_id     text        NOT NULL REFERENCES viewer.reader_personas(id),
+  viewer_version text        NOT NULL,
+  llm_metadata   jsonb       NOT NULL,
+  created_at     timestamptz NOT NULL
+);
+
+-- §4.2: viewer 폴링 — WHERE status='published' (SRS-F-005).
+-- public.chapters 위의 인덱스이지만 viewer 줄기 도입과 함께 추가되는 객체.
+CREATE INDEX IF NOT EXISTS chapters_status_published_at_idx
+  ON public.chapters (status, published_at);
+
 -- ============================================================
 -- 트리거 / GRANT / 마이그레이션 도구 / 시드는 본 walking skeleton 범위 밖.
 -- Data-Model.md §4.1, §5, §7 의 [확인 필요] 항목들 — 다음 단계에서 ADR.
