@@ -79,11 +79,16 @@
 - **viewer LLM 호출 실패 메타 보관 정책 미정** — Data Model `viewer.comment_runs.comment_id` NULL 허용 여부, 별도 실패 로그 테이블 도입 여부. `generator.draft_runs` 와 동일한 `[확인 필요]` 항목과 연동 결정 필요.
 - **Domain §4.8 (published만 댓글) 강제 위치 미정** — 트리거 vs 애플리케이션 레이어. Data Model `[확인 필요]`.
 - **viewer ↔ generator/pd 동시성 race 미명세** — 회차가 `published` 가 된 직후 viewer가 즉시 폴링·댓글 생성하는 와중에 (정의되지 않은 경로로) 회차 상태가 변동할 가능성. 본 줄기 Domain §4.1 에 `published → 다른 상태` 전이가 없으므로 현재는 무관하지만, Novel 연재 생명주기 명세에서 회차 회수/수정 시나리오를 다룰 때 함께 검토.
+- **검증 에이전트 미완 (4단계의 "검증" 부분)** — 현재 GitHub Actions claude 작업물이 자동 검증 없이 PR 로 들어옴. `claude-code-review.yml` 은 `claude[bot]` PR 을 스킵하므로 자동 머지 안전판이 없는 상태. **다음 작업으로 검증 에이전트 별도 도입 필요.**
+- **CI 러너에 sibling meta repo 없음** — 각 repo `AGENTS.md §0 읽는 순서` 가 요구하는 `../auto-web-novel-meta/docs/...` 참조를 CI 의 claude 가 건너뜀. smoke/단일 repo 작업은 영향 없으나 meta 참조가 필요한 복잡 작업은 CI 에서 제약. **meta repo 동반 체크아웃 또는 명세 동기화 전략 필요.**
+- **CI 러너에 uv / 의존성 미설치** — 각 repo `AGENTS.md` prompt 4번의 검증 (ruff/mypy/pytest) 이 "가능한 경우" 로 완화됨. 진짜 코드 변경 PR 이 들어오면 검증이 실질적으로 비어 있게 됨. **uv 설치 + 의존성 캐시 스텝 추가 필요.**
+- **dispatcher Python 3.13 / 타 서비스 3.12 불일치** — 로컬 dispatcher 가 `claude-agent-sdk` 요구사항으로 3.13 사용, generator/pd/viewer 는 3.12 유지. dispatcher 가 참고·로컬 실험용으로 보존되므로 기존 빚 그대로 유지.
 
 ---
 
 ## 변경 이력
 
+- 2026-05-26: walking skeleton 4단계 (Issue 자동화) 크게 진행 — **로컬 dispatcher → GitHub Actions 자율 루프 이관**. dispatcher repo 는 `claude-agent-sdk` 의 `query()` 로 Issue→작업→PR 을 로컬 walking skeleton 으로 구현해 generator/pd/viewer 3개 repo 순회까지 검증한 뒤, 참고·로컬 실험용으로 보존; **운영 자율화는 GitHub Actions 로 이관**. 3개 Python repo (generator/pd/viewer) 에 `anthropics/claude-code-action@v1` 기반 `auto-issue.yml` 배치 — `auto` 라벨 Issue 부착 시 클라우드에서 claude 가 자동으로 작업해 PR 생성. 인증은 **OAuth 토큰(구독 차감, API 키 아님)** 으로 카드 안전. `permission-mode: acceptEdits` + `allowedTools` 로 git/gh 허용, Sonnet 4.6, `max-turns: 30`. 모바일에서 Issue 만 등록하면 PC 없이 PR 까지 완전 자율 동작 검증됨. 별도로 `claude-code-review.yml` 의 자기검토는 `if` 조건으로 `claude[bot]` PR 을 스킵 — 자기검토 가치가 약하고 required check 로 머지를 막던 문제 해소.
 - 2026-05-23: walking skeleton 2단계 명세 추가 — **AI 독자 댓글 줄기**. Domain Model에 ReaderPersona·Comment 엔티티, ReaderIdentity 값 객체 구체화(Writer↔WriterIdentity 패턴 대칭), Aggregate Comment/ReaderPersona, §4.8(published만 댓글)·§4.9(1 persona × 1 chapter = 1 comment), `CommentPosted` 이벤트 추가. Data Model에 `viewer` 스키마 신설 + `viewer.reader_personas`/`comments`/`comment_runs` 3개 테이블, 폴링 인덱스(`(status, published_at)`)·UNIQUE 부분 인덱스, §5 스키마 분리 표·§6.2 정체성 저장소(viewer repo) 절 추가. SRS에 SRS-F-005·006(`MOD-VIEWER`) 추가, PRD-US-03 댓글 슬라이스 매핑. Flow-AI-Reader-Comment.md (`FLOW-AI-READER-COMMENT`) 신설. PRD-US-03 라인에 SRS 매핑 단서 갱신. Navigator의 인덱스/식별 결과/추적 체크/기술 빚/변경 이력 동시 갱신. 회차 줄기(SRS-F-001~004, Domain §4.1~§4.7, Flow-Chapter-Lifecycle.md)는 손대지 않음. WORLD.md / meta-specs/ 무수정.
 - 2026-05-21: walking skeleton 1c 완성 — pd가 `in_review` 회차를 OpenAI로 검수해 `published`/`draft` 전이 (SRS-F-003/004). generator(1b)→pd(1c) 절반 시뮬레이터 자동 작동 확인 (실 OpenAI smoke: "강호의 문을 열다" 회차 approve 88점 → `published`).
 - 2026-05-21: 구현 진행 — walking skeleton 1a(DB)·1b(generator)·1c(pd) 모두 구현 완료. "명세 → 코드 재현" 줄기는 회차 생성·검수 한정으로 동작.
