@@ -1,15 +1,15 @@
 ---
 spec_type: Data Model / Schema
-scope: 회차 생성·검수 줄기 + AI 독자 댓글 줄기 (사람 UI·가상결제·좋아요는 범위 밖)
+scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 (사람 UI·가상결제·좋아요는 범위 밖)
 status: 검증 대기
-updated_at: 2026-05-23
+updated_at: 2026-05-26
 references:
   - meta-specs/Architecture-Design-Meta-Spec-Info.md §Data Model
   - WORLD.md §핵심 엔티티, §공통 규칙
   - docs/Domain-Model.md
 ---
 
-# Data Model — 회차 생성·검수 + AI 독자 댓글 줄기
+# Data Model — 회차 생성·검수 + rewrite 루프 + AI 독자 댓글 줄기
 
 > 이 문서는 [docs/Domain-Model.md](Domain-Model.md) 의 엔티티를 PostgreSQL 스키마로 구현한 결과를 명세한다.
 > 엔티티명은 Domain Model과 1:1로 대응한다(같은 이름은 같은 개념).
@@ -39,13 +39,15 @@ references:
 |---|---|---|---|
 | `id` | UUID | PK | |
 | `novel_id` | UUID | FK → `public.novels(id)` ON DELETE CASCADE | |
-| `number` | int | NOT NULL, CHECK > 0 | Novel 내 회차 번호 |
+| `number` | int | NOT NULL, CHECK > 0 | Novel 내 회차 번호. `abandoned` 종착 시 번호 갭 발생 가능 (Domain §4.10) |
 | `title` | text | NOT NULL | |
-| `content` | text | NOT NULL | 마크다운 본문 |
+| `content` | text | NOT NULL | 마크다운 본문. rewrite 시 갱신(SRS-F-007) |
 | `status` | `chapter_status` (enum) | NOT NULL | §2 ENUM 참조 |
+| `revision_count` | int | NOT NULL, default 0, CHECK >= 0 | reject/needs_revision 시 +1 (SRS-F-004). MAX 도달이면 `abandoned` 종착 (Domain §4.10) |
 | `created_at` | timestamptz | NOT NULL | UTC |
 | `updated_at` | timestamptz | NOT NULL | 상태 전이 시 자동 갱신(트리거) |
 | `published_at` | timestamptz | NULL | `published` 전이 시점에 기록 |
+| `abandoned_at` | timestamptz | NULL | `abandoned` 전이 시점에 기록 (`published_at` 패턴 대칭) |
 
 ### `public.story_specs`
 | 컬럼 | 타입 | 키/제약 | 비고 |
@@ -83,7 +85,7 @@ Novel 1:1. 작가의 누적 상태(큰/세부 스토리 설계, 일화, 떡밥, 
 | `big_story_outline` | text | NOT NULL, default '' | 큰 스토리 설계 |
 | `detailed_story_plan` | jsonb | NOT NULL, default '{}'::jsonb | 세부 스토리 설계 |
 | `chapter_bodies_index` | jsonb | NOT NULL, default '[]'::jsonb | 회차 본문 인덱스/요약 |
-| `feedback_log` | jsonb | NOT NULL, default '[]'::jsonb | pd reject/needs_revision 누적. 값 형식: `[{chapter_number, decision, feedback, at}]` |
+| `feedback_log` | jsonb | NOT NULL, default '[]'::jsonb | pd reject/needs_revision 누적. 값 형식: `[{chapter_number, decision, feedback, at, review_id, revision_attempt}]`. `review_id` 는 `pd.reviews(id)` FK 참조(추적성). `revision_attempt` 는 그 시점의 Chapter.`revision_count`(디버깅·LLM 입력 정렬). generator rewrite(SRS-F-007) 시 chapter_number 필터로 해당 회차 누적분을 LLM 입력에 포함 — 보관 윈도우 정책 `[확인 필요 — 구현 시작은 전체 누적. MAX=3 이면 한 회차당 최대 3건이라 양이 적음. 회차당 분량이 커지거나 컨텍스트 한계에 부딪히면 "최근 N건" 윈도우로 재검토]` |
 | `version` | int | NOT NULL, default 0 | 낙관적 잠금용 |
 | `updated_at` | timestamptz | NOT NULL | UTC |
 
@@ -182,9 +184,12 @@ viewer의 LLM 호출 1회분 메타데이터. `generator.draft_runs` / `pd.revie
 
 ## 2. ENUM 정의
 
-- `chapter_status` = `('draft', 'in_review', 'approved', 'published', 'rejected')`
-  - `rejected`는 enum에 남기되 본 줄기에서는 사용하지 않는다 (Domain Model §4.1 참조). 회차 거절은 `status='draft'` 복귀 + `pd.reviews.decision='reject'`로 표현된다.
+- `chapter_status` = `('draft', 'in_review', 'published', 'abandoned', 'rejected')`
+  - `abandoned` (신규) — 재시도 상한 도달 종착 (Domain §4.10). pd 가 reject/needs_revision 트랜잭션 안에서 `revision_count` 가 MAX 이상이면 이 값으로 전이.
+  - `rejected` — enum 에 남기되 본 줄기에서는 사용하지 않는다 (Domain §4.1 참조). 회차 거절은 `pd.reviews.decision='reject'` 에 기록되고 Chapter.status 는 `draft` 또는 `abandoned` 로 전이된다. enum 값 제거는 후속 빚 (Navigator 기록).
+  - 이전 명세에 있던 `approved` 값은 본 개정에서 enum 에서 **제거**된다 (Domain §4.1, 1c 구현 정합화). 마이그레이션 절차는 §7 참조 — `[확인 필요]`.
 - `review_decision` = `('approve', 'reject', 'needs_revision')`
+  - 본 줄기에서 `reject` 와 `needs_revision` 의 Chapter 상태 영향은 동일하다 (둘 다 §4.6 / §4.10 분기 적용). 두 값을 분리해 두는 이유는 pd 판정 의도 보존·분석·통계 목적이며, generator 의 rewrite 동작(SRS-F-007)도 두 값을 구분하지 않는다.
 
 ---
 
@@ -220,13 +225,15 @@ comments (1) ────────────────▶ (1) comment_run
     ON public.chapters (novel_id)
     WHERE status IN ('draft', 'in_review');
   ```
+  `abandoned` 와 `published` 는 active 가 아니므로 다음 회차 fresh 생성을 막지 않는다 (Domain §4.10). 회차 번호는 `UNIQUE (novel_id, number)` 로 유일하지만 abandoned 종착으로 인한 **번호 갭은 허용**된다.
 - **한 작가는 동시에 active 소설 1개**: 부분 유니크 인덱스로 Domain Model §4.7을 강제. active 기준은 `Novel.status='drafting'`.
   ```sql
   CREATE UNIQUE INDEX novels_one_active_per_writer
     ON public.novels (writer_id)
     WHERE status = 'drafting';
   ```
-- **상태 전이 제약**: enum 차원의 값 제한은 enum이 보장. 허용 전이 그래프(§Domain 4.1)는 애플리케이션 레이어에서 검증(트리거로도 강제 가능 — `[확인 필요]`).
+- **상태 전이 제약**: enum 차원의 값 제한은 enum이 보장. 허용 전이 그래프(§Domain 4.1)는 애플리케이션 레이어에서 검증(트리거로도 강제 가능 — `[확인 필요]`). 종착 상태(`published`, `abandoned`)에서의 진출 전이는 모두 거부된다.
+- **재시도 상한 (`revision_count` ↔ `status` 정합)**: `revision_count` 증가와 `in_review → draft` / `in_review → abandoned` 전이는 동일 트랜잭션에서 일어나야 한다 (Domain §4.6 / §4.10). MAX 값 자체는 DB CHECK 가 아닌 애플리케이션 설정으로 보유 (`[확인 필요 — 기본 3 권장]`).
 - **댓글 대상 published 제약** (Domain §4.8): `viewer.comments` INSERT 시 `public.chapters.status='published'` 인지 검증. 트리거(예: `BEFORE INSERT ON viewer.comments`) 또는 애플리케이션 레이어 (`[확인 필요]` — 트리거 비용 vs 보장 강도).
 - **1 ReaderPersona × 1 Chapter = 1 Comment** (Domain §4.9): 위 §1 `comments_one_per_persona_per_chapter` 부분 유니크 인덱스가 NOT NULL 케이스에서 강제. 사람 댓글(NULL)은 제외.
 
@@ -303,3 +310,17 @@ viewer는 SQLAlchemy로 `public.chapters`(읽기) + `viewer.*`(쓰기)에 직접
   - Destructive(컬럼 삭제, 타입 변경, enum 값 제거): 사람 승인 + ADR 필수.
 - **시간**: 모든 timestamp는 UTC. 컬럼 타입은 `timestamptz` (WORLD.md §시간).
 - **다운타임**: Phase 1 단일 인스턴스이므로 큰 마이그레이션은 점검 시간에 일괄. Phase 2 이후 무중단 전략 별도 명세.
+
+### 7.1 walking skeleton 3단계 (rewrite 루프) 마이그레이션 항목
+
+- **Additive — 자동 적용 가능**:
+  - `public.chapters` 컬럼 추가: `revision_count INT NOT NULL DEFAULT 0`, `abandoned_at TIMESTAMPTZ NULL`.
+  - `chapter_status` enum 값 추가: `abandoned` (`ALTER TYPE chapter_status ADD VALUE 'abandoned';`).
+  - `generator.writer_contexts.feedback_log` 엔트리 형식 확장(`review_id`, `revision_attempt`). 컬럼 타입(`jsonb`) 변경 없음, 새 엔트리부터 적용. 기존 엔트리는 누락 키로 남기되 application 이 nullable 로 읽음.
+
+- **Destructive — 사람 승인 + ADR 필수** `[확인 필요]`:
+  - `chapter_status` enum 값 제거: `approved`. 절차:
+    1. 사전 점검: `SELECT count(*) FROM public.chapters WHERE status='approved';` 이 0 인지 확인 (1c 구현이 이미 `in_review → published` 직행이라 0 이어야 함).
+    2. enum 값 제거는 Postgres 가 직접 지원하지 않으므로 새 enum 타입 생성 → 컬럼 타입 변환 → 기존 타입 DROP 순서. 또는 enum 값을 "사용 안 함"으로만 표시하고 제거는 후속 마이그레이션으로 보류.
+    3. 결정·절차는 별도 ADR 권장 (대안: `approved` 값을 코드에서만 거부하고 enum 에는 유지).
+  - `chapter_status` enum 값 제거: `rejected` (본 줄기 미사용). **본 마이그레이션에서는 제거하지 않는다** — 후속 빚 (Navigator 기록).
