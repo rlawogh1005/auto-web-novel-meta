@@ -14,10 +14,10 @@
 |---|---|---|---|---|
 | North Star | [North-Star.md](North-Star.md) | NS | 확정 | 2026-05-21 |
 | PRD | [PRD.md](PRD.md) | PRD-US-01 ~ PRD-US-05 | 확정 (세부 수치 [확인 필요]) | 2026-05-23 |
-| Domain Model | [Domain-Model.md](Domain-Model.md) | Novel, Chapter, StorySpec, Writer, WriterContext, Foreshadow, Episode, ReviewDecision, AgentIdentity, WriterIdentity, ReaderIdentity, ReaderPersona, Comment | 검증 대기 | 2026-05-23 |
-| Data Model | [Data-Model.md](Data-Model.md) | (Domain Model과 동일 엔티티명) + `generator.writers`, `viewer.reader_personas`, `viewer.comments`, `viewer.comment_runs` + ENUM `chapter_status`, `review_decision` | 검증 대기 | 2026-05-23 |
-| SRS | [SRS.md](SRS.md) | SRS-F-001 ~ SRS-F-006 | 검증 대기 | 2026-05-23 |
-| Sequence / Flow | [Flow-Chapter-Lifecycle.md](Flow-Chapter-Lifecycle.md) | FLOW-CHAPTER-LIFECYCLE | 검증 대기 | 2026-05-21 |
+| Domain Model | [Domain-Model.md](Domain-Model.md) | Novel, Chapter, StorySpec, Writer, WriterContext, Foreshadow, Episode, ReviewDecision, AgentIdentity, WriterIdentity, ReaderIdentity, ReaderPersona, Comment | 검증 대기 | 2026-05-26 |
+| Data Model | [Data-Model.md](Data-Model.md) | (Domain Model과 동일 엔티티명) + `generator.writers`, `viewer.reader_personas`, `viewer.comments`, `viewer.comment_runs` + ENUM `chapter_status` (+ `abandoned`, − `approved`), `review_decision` + Chapter.`revision_count`/`abandoned_at` | 검증 대기 | 2026-05-26 |
+| SRS | [SRS.md](SRS.md) | SRS-F-001 ~ SRS-F-008 | 검증 대기 | 2026-05-26 |
+| Sequence / Flow | [Flow-Chapter-Lifecycle.md](Flow-Chapter-Lifecycle.md) | FLOW-CHAPTER-LIFECYCLE | 검증 대기 | 2026-05-26 |
 | Sequence / Flow | [Flow-AI-Reader-Comment.md](Flow-AI-Reader-Comment.md) | FLOW-AI-READER-COMMENT | 검증 대기 | 2026-05-23 |
 
 상태 값: `식별됨` → `작성 중` → `검증 대기` → `확정`
@@ -31,6 +31,7 @@
 지금까지의 식별 범위:
 - **walking skeleton 1단계** — "회차 생성 → 검수" 줄기 (2026-05-21 작성 완료).
 - **walking skeleton 2단계** — "AI 독자가 published 회차를 읽고 댓글" 줄기 (2026-05-23 작성 완료). 가상결제·좋아요·사람 UI 는 3단계+ 로 보류.
+- **walking skeleton 3단계** — "rewrite 루프" 줄기 (2026-05-26 작성 완료). pd reject → generator rewrite → 재검수 루프 + revision_count 상한 → `abandoned` 종착. SRS-F-007/008 신설, Domain §4.10 신설, `approved` 중간 단계 명세 제거(빚 해소). 운영자 개입 모델 / Novel 일시중지 / 회차 번호 갭 정책 / `approved`·`rejected` enum 값 제거 마이그레이션은 후속 빚.
 
 | 명세 유형 | 필요 판단 근거 (트리거) | 우선순위 | 작성 여부 |
 |---|---|---|---|
@@ -53,14 +54,14 @@
 
 | 항목 | 상태 | 비고 |
 |---|---|---|
-| 고아 SRS 없음 (모든 SRS-F가 PRD 근거를 가짐) | ✅ | SRS-F-001/002 → PRD-US-01, SRS-F-003/004 → PRD-US-02, SRS-F-005/006 → PRD-US-03 (댓글 슬라이스) 매핑 완료. |
-| 미구현 PRD 없음 (모든 PRD-US가 SRS로 이어짐) | ⚠️ 부분 | PRD-US-01/02 완전 매핑. PRD-US-03 은 댓글 부분만 SRS-F-005/006 으로 매핑 (가상결제·좋아요는 향후). PRD-US-04 (사람 관람) / PRD-US-05 (운영자) 는 SRS 미작성. |
-| 미할당 SRS-F 없음 (각 SRS-F가 1개 모듈에 할당) | ⚠️ 의도된 보류 | SRS는 `MOD-GENERATOR`, `MOD-PD`, `MOD-VIEWER` 를 owner_module로 선언했으나 Module Map은 아직 미작성. Module Map 작성 시 정식 통과. |
+| 고아 SRS 없음 (모든 SRS-F가 PRD 근거를 가짐) | ✅ | SRS-F-001/002/007 → PRD-US-01, SRS-F-003/004/008 → PRD-US-02, SRS-F-005/006 → PRD-US-03 (댓글 슬라이스) 매핑 완료. |
+| 미구현 PRD 없음 (모든 PRD-US가 SRS로 이어짐) | ⚠️ 부분 | PRD-US-01/02 완전 매핑 (3단계 rewrite/abandoned 포함). PRD-US-03 은 댓글 부분만 SRS-F-005/006 으로 매핑 (가상결제·좋아요는 향후). PRD-US-04 (사람 관람) / PRD-US-05 (운영자) 는 SRS 미작성. |
+| 미할당 SRS-F 없음 (각 SRS-F가 1개 모듈에 할당) | ⚠️ 의도된 보류 | SRS는 `MOD-GENERATOR`, `MOD-PD`, `MOD-VIEWER` 를 owner_module로 선언했으나 Module Map은 아직 미작성. SRS-F-007/008 도 같은 모듈 이름 사용. Module Map 작성 시 정식 통과. |
 | 의존 그래프 DAG (순환 없음) | N/A | Module Map 미작성. |
 | 모든 ADR이 Constraint/SRS 인용 | N/A | ADR 미작성. |
 | 모든 API Contract가 구현 모듈 보유 | N/A | API Contract 없음(Phase 1). |
 
-마지막 검증: 2026-05-23
+마지막 검증: 2026-05-26
 
 ---
 
@@ -71,7 +72,7 @@
 - **Novel 연재 생명주기 명세 미작성** — 현재 `Novel.status`는 `drafting → published → archived` 단순 모델이라 *발행 후에도 연재 지속(published + 작가 active 유지)* 같은 웹소설 연재 구조를 아직 다루지 못한다. Domain Model §4.7의 "active = `Novel.status='drafting'`" 단일 기준도 이 미작성에 의존한다. **회차 줄기 완료 후 Novel 상태기계 별도 명세에서 다룬다.**
 - **회차 "완성" 판정 기준 미정** — generator 구현에서 `MIN_CHAPTER_LENGTH=1000`자를 임시 컷오프로 사용 중이나 정식 기준이 없다 (분량·서사 단위·작가 의도 중 무엇으로 판단할지 미결). 결과적으로 `generate-next`가 자주 미달해 추가 호출이 필요. **SRS-F-001 "회차 완성" 정의 보완 작업에서 다룬다.**
 - **통합 테스트가 개발용 DB를 직접 TRUNCATE** — 현재 통합 테스트가 개발용 PostgreSQL(5433)에 붙어 `TRUNCATE`를 실행해 개발 데이터가 함께 삭제됨. **테스트용 DB 분리(또는 컨테이너 격리) 필요** — Data Model 환경 절 또는 ADR 후보.
-- **approve 전이가 in_review→published 직행** — Domain Model §4.1 상태기계는 `approved` 중간 상태를 거치도록 정의하나 1c 구현은 walking skeleton 압축을 위해 생략하고 곧장 `published`로 전이. **명세-구현 정합성 정리 필요** (Domain 단순화 vs 구현 정상화 중 결정).
+- **~~approve 전이가 in_review→published 직행~~** — **해소 (2026-05-26, walking skeleton 3단계)**. rewrite 루프 명세를 손보면서 Domain §4.1 의 `approved` 중간 단계를 제거하고 `in_review → published` 직행으로 명세 단순화. 1c 구현과 정합. `chapter_status` enum 에서 `approved` 값 자체의 제거 마이그레이션은 별도 빚으로 분리 (아래 항목).
 - **pd가 `generator.writer_contexts`에 직접 쓰기 (cross-schema write)** — 식별 결과 §38에 ADR 후보로 적힌 "pd→writer_contexts 직접 쓰기 정책"이 구현되었으나 ADR 미작성. **결정 근거·대안(이벤트, generator 호출) 문서화 필요.**
 - **~~viewer / reader / 경제 명세 부재~~** — **부분 해소 (2026-05-23, walking skeleton 2단계)**. AI 독자 댓글 줄기는 SRS-F-005/006 + viewer 스키마 + `FLOW-AI-READER-COMMENT` 로 명세됨. 남은 미작성: **독자 가상결제·좋아요 (walking skeleton 3단계+)**, **사람 사용자의 발행 회차 노출 UI·좋아요·댓글 (확장 1·2단계)**, **viewer 웹 API 컨트랙트** — 사람 UI 또는 외부 시스템 도입 시점에 식별.
 - **viewer 폴링 주기 미정** — SRS-F-005가 `[확인 필요]` 로 표기. 실제 운영 시 cron 표현 또는 인터벌 결정 필요. ADR 또는 SRS 보완.
@@ -83,11 +84,17 @@
 - **CI 러너에 sibling meta repo 없음** — 각 repo `AGENTS.md §0 읽는 순서` 가 요구하는 `../auto-web-novel-meta/docs/...` 참조를 CI 의 claude 가 건너뜀. smoke/단일 repo 작업은 영향 없으나 meta 참조가 필요한 복잡 작업은 CI 에서 제약. **meta repo 동반 체크아웃 또는 명세 동기화 전략 필요.**
 - **CI 러너에 uv / 의존성 미설치** — 각 repo `AGENTS.md` prompt 4번의 검증 (ruff/mypy/pytest) 이 "가능한 경우" 로 완화됨. 진짜 코드 변경 PR 이 들어오면 검증이 실질적으로 비어 있게 됨. **uv 설치 + 의존성 캐시 스텝 추가 필요.**
 - **dispatcher Python 3.13 / 타 서비스 3.12 불일치** — 로컬 dispatcher 가 `claude-agent-sdk` 요구사항으로 3.13 사용, generator/pd/viewer 는 3.12 유지. dispatcher 가 참고·로컬 실험용으로 보존되므로 기존 빚 그대로 유지.
+- **`chapter_status` enum 값 제거 마이그레이션 (`approved`, `rejected`)** — walking skeleton 3단계 빚. `approved` 는 본 명세 개정으로 미사용이 됐으나 enum 값 자체 제거(destructive)는 후속 마이그레이션으로 분리 (Data Model §7.1). `rejected` 는 1단계 시점부터 미사용이며 동일하게 후속 마이그레이션. Postgres enum drop value 가 직접 미지원이라 새 enum 타입 생성·컬럼 변환·기존 타입 DROP 절차 필요 → ADR 후보.
+- **rewrite 루프 MAX 값 미정** — walking skeleton 3단계 빚. Domain §4.10 의 `MAX_REVISION_ATTEMPTS` 값 `[확인 필요 — 기본 3 권장]`. 너무 작으면 정상 검수가 abandoned 폭증, 너무 크면 비용·시간 낭비. 구현 시 결정.
+- **rewrite LLM 입력의 feedback_log 보관 윈도우 미정** — walking skeleton 3단계 빚. `[확인 필요 — 구현 시작은 전체 누적. MAX=3 이면 한 회차당 최대 3건이라 양이 적음. 회차당 분량이 커지거나 컨텍스트 한계에 부딪히면 "최근 N건" 윈도우로 재검토]`. 기존 Flow §4.4 빚을 본 명세 결정 방향으로 갱신.
+- **abandoned 운영자 가시성 / 알림 / Novel 일시중지 모델 미작성** — walking skeleton 3단계의 부산물 빚. SRS-F-008 은 abandoned 종착 후 generator 가 N+1 fresh 로 자동 진행한다고 정의하나, 운영자가 abandoned 발생을 인지하고 개입할 경로(알림·admin UI·Novel 자체 일시중지)는 본 줄기 범위 밖. Novel 연재 생명주기 명세와 함께 다루는 게 자연스러움.
+- **회차 번호 갭 정책 미정** — walking skeleton 3단계 부산물. abandoned 종착으로 `published` 회차 목록에 번호 갭이 발생하는 것을 어떻게 표시·운영할지 (renumber? gap 표시? 사용자에게 hide?) 결정 없음. viewer / web-app / mobile-app 가 published 목록 노출을 명세할 때 함께 다룬다.
 
 ---
 
 ## 변경 이력
 
+- 2026-05-26: walking skeleton 3단계 명세 추가 — **rewrite 루프 줄기**. pd reject 시 generator 가 같은 draft 본문을 재작성(rewrite)하는 메커니즘과 무한 재시도 방지(`revision_count` + `abandoned` 종착)를 명세. Domain Model §4.1 상태기계 개정(`approved` 중간 단계 제거 — 1c 구현 정합화, `abandoned` 신규 종착, rewrite 루프 명시), §4.5/§4.6 소폭 append, §4.10 신설(재시도 상한), §5 이벤트 갱신(`ChapterApproved` 제거, `ChapterRewritten`·`ChapterAbandoned` 추가). Data Model `public.chapters` 에 `revision_count`/`abandoned_at` 컬럼, `chapter_status` enum 에 `abandoned` 추가·`approved` 제거(미사용 enum 값 제거 마이그레이션은 §7.1 별도 빚), `feedback_log` 엔트리 형식 확장(`review_id`, `revision_attempt`). SRS-F-001/002/004 소폭 modify, SRS-F-007(rewrite, `MOD-GENERATOR`)·SRS-F-008(abandoned 종착, `MOD-PD`) 신설. Flow-Chapter-Lifecycle 시퀀스에 FRESH/REWRITE 분기, abandoned 분기 추가. Navigator 인덱스·식별 결과·추적 무결성·기술 빚(approve 직행 빚 해소·신규 빚 5건 추가)·변경 이력 동시 갱신. WORLD.md / meta-specs / viewer·댓글 줄기(Flow-AI-Reader-Comment, viewer 스키마, SRS-F-005/006) 무수정. 결정: `approved` 명세 제거 / abandoned 후 N+1 자동 진행(회차 번호 갭 허용) / `needs_revision` 과 `reject` Chapter 영향 동일 / revision_count=0 draft 도 rewrite 모드 동일 처리.
 - 2026-05-26: walking skeleton 4단계 (Issue 자동화) 크게 진행 — **로컬 dispatcher → GitHub Actions 자율 루프 이관**. dispatcher repo 는 `claude-agent-sdk` 의 `query()` 로 Issue→작업→PR 을 로컬 walking skeleton 으로 구현해 generator/pd/viewer 3개 repo 순회까지 검증한 뒤, 참고·로컬 실험용으로 보존; **운영 자율화는 GitHub Actions 로 이관**. 3개 Python repo (generator/pd/viewer) 에 `anthropics/claude-code-action@v1` 기반 `auto-issue.yml` 배치 — `auto` 라벨 Issue 부착 시 클라우드에서 claude 가 자동으로 작업해 PR 생성. 인증은 **OAuth 토큰(구독 차감, API 키 아님)** 으로 카드 안전. `permission-mode: acceptEdits` + `allowedTools` 로 git/gh 허용, Sonnet 4.6, `max-turns: 30`. 모바일에서 Issue 만 등록하면 PC 없이 PR 까지 완전 자율 동작 검증됨. 별도로 `claude-code-review.yml` 의 자기검토는 `if` 조건으로 `claude[bot]` PR 을 스킵 — 자기검토 가치가 약하고 required check 로 머지를 막던 문제 해소.
 - 2026-05-23: walking skeleton 2단계 명세 추가 — **AI 독자 댓글 줄기**. Domain Model에 ReaderPersona·Comment 엔티티, ReaderIdentity 값 객체 구체화(Writer↔WriterIdentity 패턴 대칭), Aggregate Comment/ReaderPersona, §4.8(published만 댓글)·§4.9(1 persona × 1 chapter = 1 comment), `CommentPosted` 이벤트 추가. Data Model에 `viewer` 스키마 신설 + `viewer.reader_personas`/`comments`/`comment_runs` 3개 테이블, 폴링 인덱스(`(status, published_at)`)·UNIQUE 부분 인덱스, §5 스키마 분리 표·§6.2 정체성 저장소(viewer repo) 절 추가. SRS에 SRS-F-005·006(`MOD-VIEWER`) 추가, PRD-US-03 댓글 슬라이스 매핑. Flow-AI-Reader-Comment.md (`FLOW-AI-READER-COMMENT`) 신설. PRD-US-03 라인에 SRS 매핑 단서 갱신. Navigator의 인덱스/식별 결과/추적 체크/기술 빚/변경 이력 동시 갱신. 회차 줄기(SRS-F-001~004, Domain §4.1~§4.7, Flow-Chapter-Lifecycle.md)는 손대지 않음. WORLD.md / meta-specs/ 무수정.
 - 2026-05-21: walking skeleton 1c 완성 — pd가 `in_review` 회차를 OpenAI로 검수해 `published`/`draft` 전이 (SRS-F-003/004). generator(1b)→pd(1c) 절반 시뮬레이터 자동 작동 확인 (실 OpenAI smoke: "강호의 문을 열다" 회차 approve 88점 → `published`).
