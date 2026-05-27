@@ -13,9 +13,10 @@ CREATE SCHEMA pd;
 
 -- ------------------------------------------------------------
 -- 2. ENUM (Data-Model.md §2)
---    chapter_status.rejected 는 enum에 남기되 현 줄기에서는 미사용.
+--    chapter_status.approved / .rejected 는 enum 에 남기되 본 줄기에서는 미사용.
+--    제거는 Postgres enum 특성상 destructive — 후속 빚 (Data-Model §7.1).
 -- ------------------------------------------------------------
-CREATE TYPE chapter_status  AS ENUM ('draft', 'in_review', 'approved', 'published', 'rejected');
+CREATE TYPE chapter_status  AS ENUM ('draft', 'in_review', 'approved', 'published', 'abandoned', 'rejected');
 CREATE TYPE review_decision AS ENUM ('approve', 'reject', 'needs_revision');
 
 -- ------------------------------------------------------------
@@ -69,15 +70,17 @@ CREATE UNIQUE INDEX novels_one_active_per_writer
 -- 5. public.chapters + 인덱스 3개 (§4.1, §4.2)
 -- ------------------------------------------------------------
 CREATE TABLE public.chapters (
-  id           uuid           PRIMARY KEY,
-  novel_id     uuid           NOT NULL REFERENCES public.novels(id) ON DELETE CASCADE,
-  number       int            NOT NULL CHECK (number > 0),
-  title        text           NOT NULL,
-  content      text           NOT NULL,
-  status       chapter_status NOT NULL,
-  created_at   timestamptz    NOT NULL DEFAULT now(),
-  updated_at   timestamptz    NOT NULL DEFAULT now(),
-  published_at timestamptz    NULL,
+  id             uuid           PRIMARY KEY,
+  novel_id       uuid           NOT NULL REFERENCES public.novels(id) ON DELETE CASCADE,
+  number         int            NOT NULL CHECK (number > 0),
+  title          text           NOT NULL,
+  content        text           NOT NULL,
+  status         chapter_status NOT NULL,
+  revision_count int            NOT NULL DEFAULT 0 CHECK (revision_count >= 0),
+  created_at     timestamptz    NOT NULL DEFAULT now(),
+  updated_at     timestamptz    NOT NULL DEFAULT now(),
+  published_at   timestamptz    NULL,
+  abandoned_at   timestamptz    NULL,
   UNIQUE (novel_id, number)
 );
 
