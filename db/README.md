@@ -82,6 +82,18 @@ docker compose up -d     # 빈 볼륨에서 schema.sql 다시 init
 
 ---
 
+## 마이그레이션 (떠있는 DB에 변경 적용)
+
+기존 볼륨을 유지한 채 스키마 변경을 반영. `db/migrations/*.sql` 은 모두 idempotent (`IF NOT EXISTS`) 라 여러 번 실행해도 안전.
+
+```powershell
+docker compose exec -T postgres psql -U postgres -d auto_web_novel -f - < db/migrations/2026-05-rewrite.sql
+```
+
+> walking skeleton 3단계 (rewrite 루프). 추가 항목: `chapter_status='abandoned'`, `chapters.revision_count`, `chapters.abandoned_at` (Data-Model §1, §2, §7.1).
+
+---
+
 ## 종료
 
 ```powershell
