@@ -1,6 +1,6 @@
 ---
 spec_type: SRS (Software Requirements Specification)
-scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 (사람 UI·가상결제·좋아요는 범위 밖)
+scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 + 작가-PD 1:1 페어링 골격 (사람 UI·가상결제·좋아요는 범위 밖)
 status: 검증 대기
 updated_at: 2026-05-28
 references:
@@ -11,16 +11,17 @@ references:
   - docs/Flow-AI-Reader-Comment.md
 ---
 
-# SRS — 회차 생성·검수 + rewrite 루프 + AI 독자 댓글 줄기
+# SRS — 회차 생성·검수 + rewrite 루프 + AI 독자 댓글 + 작가-PD 페어링 줄기
 
-> 이 문서는 세 줄기의 기능 요구를 명세한다.
+> 이 문서는 네 줄기의 기능 요구를 명세한다.
 > 1. **회차 줄기 (walking skeleton 1단계)** — 회차 1건이 generator에서 생성되어 pd 검수를 거쳐 published 되거나 다시 draft로 돌아간다.
 > 2. **AI 독자 댓글 줄기 (walking skeleton 2단계)** — published 회차에 AI 독자(reader-agent)가 댓글을 단다.
 > 3. **rewrite 루프 줄기 (walking skeleton 3단계)** — pd reject 시 generator 가 피드백을 받아 같은 draft 의 본문을 재작성한다. 무한 루프를 방지하기 위해 재시도 상한을 두고 도달 시 `abandoned` 로 종착한다.
+> 4. **작가-PD 1:1 페어링 골격 (walking skeleton 4단계)** — Novel 마다 담당 PD 1명이 배정되고, 각 PD 는 자기 담당 novel 의 in_review 만 검수한다. PD 별 정체성(SOUL) 없음 — 공통 rubric (SRS-F-003 (A)) 적용. **시너지 (담당 PD 가 그 작가 이력을 검수 입력에 주입) 는 본 명세 범위 밖** — 다음 줄기.
 >
 > NFR(성능·보안·가용성)과 다른 줄기(사람 UI 좋아요/댓글, 독자 가상결제)는 본 명세 범위 밖이다.
 
-> **PRD-US 매핑 안내**: SRS-F-001~004 / SRS-F-007 / SRS-F-008 은 PRD-US-01/02 (작가·PD)에 매핑된다. SRS-F-005~006은 PRD-US-03 (독자) 중 **댓글 부분**에만 매핑된다 — 가상결제·좋아요는 향후 SRS, 미작성.
+> **PRD-US 매핑 안내**: SRS-F-001~004 / SRS-F-007 / SRS-F-008 / SRS-F-009 는 PRD-US-01/02 (작가·PD)에 매핑된다. SRS-F-005~006은 PRD-US-03 (독자) 중 **댓글 부분**에만 매핑된다 — 가상결제·좋아요는 향후 SRS, 미작성.
 
 ---
 
@@ -142,7 +143,7 @@ references:
 
 #### (E) Given / When / Then
 
-- **Given**: `public.chapters` 에 `status='in_review'` 인 row 가 1개 이상 존재한다.
+- **Given**: pd 인스턴스가 자기 식별자(`$self_pd_id`)를 가지고 시작한 상태에서, `public.chapters` c JOIN `public.novels` n ON `c.novel_id = n.id` 에서 `c.status='in_review' AND n.assigned_pd_id = $self_pd_id` 인 row 가 1개 이상 존재한다 (담당 필터, SRS-F-009 — 1:1 페어링). `$self_pd_id` 는 pd CLI / 워커가 시작 시 입력으로 받는다 (`[확인 필요 — 코드 PR 의 CLI 인자명·환경변수 결정]`).
 - **When**: pd 의 폴링 cycle 이 실행된다.
 - **Then**:
   1. 각 in_review Chapter 에 대해 pd 는 (C) 의 LLM 응답 스키마에 맞춰 LLM(WORLD §LLM 호출 규칙) 을 호출한다.
@@ -155,7 +156,7 @@ references:
      - (iii) `blockers` 가 비어 있으면 → (A) 점수 임계 (`quality_score >= 80 → approve / 60 <= quality_score < 80 → needs_revision / quality_score < 60 → reject`) 적용.
 
      **G1 사유 식별**: `blockers` 배열의 문자열에서 G1 트리거 여부를 코드가 판별 가능해야 한다. 본 SRS 에서는 식별 방식 자체는 `[확인 필요 — 구현 시 LLM 응답 스키마 보조 필드(예: blocker_codes) 추가 또는 prompt 측 prefix 약속]`. LLM 이 자유 텍스트로만 사유를 적으면 G1/G2~G4 분기가 불가능하므로 본 SRS 개정 이후 코드 PR 에서 같이 해결한다.
-  6. 동일 Chapter 에 대한 동시 검수는 직렬화된다 — 동일 in_review row 를 두 pd 인스턴스가 동시에 잡지 못한다 (구현: `FOR UPDATE SKIP LOCKED` 또는 어드바이저리 락, `[확인 필요]`).
+  6. **동시성 — 1:1 페어링으로 교차 담당 경합은 구조적으로 제거됐다** (Domain §4.11, SRS-F-009). `assigned_pd_id` 필터가 폴링 단계에서 분리하므로 서로 다른 PD 인스턴스가 같은 in_review 회차를 잡으려는 경합은 발생하지 않는다. `FOR UPDATE SKIP LOCKED` (또는 어드바이저리 락) 는 **같은 PD 인스턴스의 중복 실행** (수평 스케일 · 재시작 race · cron 중첩) 대비로 유지한다 — 한 PD 인스턴스가 자기 담당의 같은 in_review row 를 두 번 잡지 않도록.
 - **실패 케이스**: LLM 호출 실패 또는 응답이 (C) 스키마를 만족하지 못함 — 어느 경우든 review row 를 생성하지 않는다. Chapter 는 `in_review` 로 잔류해 다음 cycle 에서 다시 pick up 된다.
 
 ---
@@ -282,6 +283,35 @@ references:
 
 ---
 
+### SRS-F-009 — 작가-PD 1:1 페어링
+
+**설명**: Novel 활성화 시점에 active=true 인 PdAgent 1명이 배정되어 Novel 종착(`published` / `archived`)까지 유지된다. Writer ↔ Novel 1:1 (Domain §4.7 — SRS-F-001/007 의 활성 작가 1편 전제) 와 Novel ↔ PdAgent 1:1 (Domain §4.11) 이 결합되어 **(Writer, Novel, PdAgent) 가 동시에 active 인 동안 1:1:1 페어**가 된다. PD 별 정체성(SOUL) 은 본 줄기에 없고 공통 rubric (SRS-F-003 (A)) 이 모든 PD 에 동일 적용된다. **시너지 — 담당 PD 가 그 작가 이력을 검수 LLM 입력에 주입하는 동작 — 은 본 줄기 범위 밖** (다음 줄기).
+
+**maps_to_prd**: `PRD-US-02`
+
+**owner_module**: `[확인 필요 — 배정 주체. admin / system 중 Module Map 작성 시 결정]`
+
+**acceptance**:
+
+- Given: `pd.pd_agents` 에 `active=true` 인 PD row 가 1명 이상 존재한다.
+- When: Novel 이 `status='drafting'` 으로 활성화될 때 (admin 이 StorySpec 을 활성화해 generator 가 Novel row 를 생성하는 시점).
+- Then:
+  1. `public.novels.assigned_pd_id` 가 채워진 채로 INSERT 되며, 값은 `pd.pd_agents` 의 `active=true` row 1건의 `id` 다 (NOT NULL FK, Data §1).
+  2. **1:1 페어링 강제**: 같은 `assigned_pd_id` 를 가진 `status='drafting'` Novel row 는 동시에 최대 1개. 부분 유니크 인덱스 `novels_one_active_per_pd` (Data §4.1) 가 강제. 두 번째 active novel 배정 시도는 unique violation 으로 거부된다.
+  3. 페어링은 Novel 종착까지 불변 — Novel 도중 `assigned_pd_id` 재배정은 본 줄기 범위 밖 (Navigator 빚).
+  4. **배정 알고리즘** (자동 round-robin / 랜덤 / 수동 admin 지정 / 시드) 은 `[확인 필요 — 코드 PR 의 ADR]`. 본 SRS 는 "active PD 1명이 배정된다" 까지만 강제하며 구체 선택 정책은 강제하지 않는다.
+- 실패 케이스:
+  - `pd.pd_agents` 에 `active=true` PD 가 0명이면 Novel 생성이 NOT NULL FK 위반으로 거부된다 — 시드 순서 제약(Data §7.2: pd_agents → writers → novels)으로 운영상 회피. 운영 정책(대기열·알림·수동 배정) 은 본 줄기 범위 밖 (Navigator 빚).
+  - `active PD < drafting novel 수` 의 1:1 깨짐 케이스도 위와 동일하게 새 Novel 생성이 unique violation 으로 거부된다 — YAGNI 정책, 본 줄기 범위 밖.
+
+**범위 밖 (재확인)**:
+- ❌ 배정 알고리즘 구현 (round-robin / 랜덤 / admin 수동) — 코드 PR.
+- ❌ Novel 도중 PD 재배정 / PD 이탈·교체 모델.
+- ❌ PD 별 정체성(SOUL) 도입 — 현재 공통 rubric. 다음 줄기.
+- ❌ 시너지 (담당 PD 가 그 작가의 누적 `writer_contexts` / 과거 `pd.reviews` 등을 SRS-F-003 (B) LLM 입력에 주입) — 다음 줄기.
+
+---
+
 ## 3. 비기능 요구사항
 
 본 줄기 범위 밖. 추후 SRS-N 형태로 별도 명세. (성능: 폴링 주기·생성 빈도 / 보안: 서비스 간 권한 / 가용성: 재시도·중단 복구 등)
@@ -300,6 +330,7 @@ references:
 | `PRD-US-03` (댓글 슬라이스) | SRS-F-006 | MOD-VIEWER | reader-agent 댓글 생성 |
 | `PRD-US-01` | SRS-F-007 | MOD-GENERATOR | active draft 발견 시 본문 재작성 (rewrite, walking skeleton 3단계) |
 | `PRD-US-02` | SRS-F-008 | MOD-PD | revision_count >= MAX 도달 시 abandoned 종착 (walking skeleton 3단계) |
+| `PRD-US-02` | SRS-F-009 | `[확인 필요 — 배정 주체]` | 작가-PD 1:1 페어링 구조 (walking skeleton 4단계). 시너지·정체성 없음 |
 
 > **고지**:
 > - `PRD-US-03` 은 본디 "독자 에이전트가 발행 회차에 가상결제·댓글·좋아요로 반응" 전체를 다룬다. 본 SRS의 SRS-F-005/006 은 그 중 **댓글 부분 슬라이스**만 매핑한다. 가상결제·좋아요는 향후 SRS, 미작성.
