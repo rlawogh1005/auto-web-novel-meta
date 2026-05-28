@@ -121,20 +121,22 @@ references:
 
 #### (C) LLM 응답 스키마 (pd 가 LLM 에게 강제하는 출력 형식)
 
+> **개정 근거**: 이전 개정은 LLM 에게 `quality_score` 와 `decision` 까지 요구하고 코드가 검증·재산출하는 이중 구조였다. 실측 결과 LLM 이 항목별 점수는 일관되게 변별하면서도 가중합 산술과 거부 게이트 규칙 적용에는 일관적 실패를 보였다. 본 개정은 LLM 응답 책임을 "변별과 사유 (항목 점수 + blockers + feedback)" 로 좁히고, 산술·규칙 적용은 코드 단독 산출로 단일화한다.
+
 - `item_score_fun`: 0–100. 재미·몰입.
 - `item_score_prose`: 0–100. 문장 품질.
 - `item_score_consistency`: 0–100. 캐릭터·세계관 일관성.
 - `item_score_completeness`: 0–100. 회차 완결성 (도입–전개–훅 — SRS-F-002 (b) 의 self-check 와 동일 차원을 pd 가 독립 평가).
 - `blockers`: `string[]`. 트리거된 거부 게이트 사유 (없으면 빈 배열).
-- `quality_score`: 0–100. (A) 의 가중합으로 산출. 거부 게이트와 독립.
-- `decision`: `approve | reject | needs_revision`. (A) 점수 임계와 (B) 거부 게이트를 적용한 최종 판정.
 - `feedback`: 자유 텍스트. reject/needs_revision 시 generator 가 다음 rewrite 입력으로 사용.
+
+`quality_score` 와 `decision` 은 LLM 응답에 포함되지 않는다 — 코드가 항목별 점수와 `blockers` 로부터 (A)·(B) 를 적용해 산출한다 (E 절 Then-2·Then-5 참조).
 
 #### (D) `pd.reviews` 영속 필드 — 본 개정에서 무변경
 
 본 SRS 범위에서 `pd.reviews` row 에 영속되는 컬럼은 기존대로 `(chapter_id, pd_version, decision, quality_score, feedback, created_at)` 다 (Data Model §1 변경 없음). **항목별 점수·`blockers` 영속화는 `[확인 필요 — Data Model §pd.reviews 컬럼 추가, 사후 분석용]`.**
 
-**한계 (후속 빚으로 인식)**: (A) 의 `quality_score` 가중합 계산식은 본 명세의 약속이지만, **입력값인 항목별 점수(`item_score_fun / prose / consistency / completeness`) 가 DB 에 영속되지 않으므로 사후에 식이 제대로 적용됐는지 검증할 수 없다.** `blockers` 도 동일 — 어떤 거부 게이트가 트리거됐는지 `pd.reviews` row 만 보고는 알 수 없고, 자유 텍스트 `feedback` 안에 사유가 들어 있을 거라는 약한 가정에 의존한다. 항목별 점수·`blockers` 컬럼이 추가될 때까지 본 한계는 그대로 남는다.
+**한계 (후속 빚으로 인식)**: (A)·(B) 산출은 본 개정에서 코드 단독 책임이 됐으므로 "식이 제대로 적용됐는지" 의문은 명세 수준에서 해소됐다. 다만 **입력값인 항목별 점수(`item_score_fun / prose / consistency / completeness`) 와 `blockers` 가 DB 에 영속되지 않으므로**, `pd.reviews` row 에 저장된 `quality_score` 가 어떤 항목 조합에서 나왔는지, 어떤 거부 게이트가 트리거돼 `decision='needs_revision'` 으로 강제됐는지 사후에 추적할 수 없다. 자유 텍스트 `feedback` 안에 사유가 들어 있을 거라는 약한 가정에 의존한다. 항목별 점수·`blockers` 컬럼이 추가될 때까지 본 한계는 그대로 남는다.
 
 #### (E) Given / When / Then
 
@@ -142,12 +144,12 @@ references:
 - **When**: pd 의 폴링 cycle 이 실행된다.
 - **Then**:
   1. 각 in_review Chapter 에 대해 pd 는 (C) 의 LLM 응답 스키마에 맞춰 LLM(WORLD §LLM 호출 규칙) 을 호출한다.
-  2. **pd 는 LLM 응답의 `quality_score` 를 그대로 신뢰하지 않는다.** 코드에서 (A) 의 가중합 식을 항목별 점수(`item_score_*`) 로부터 재계산하고, 재계산값과 LLM 응답 `quality_score` 가 일치하지 않으면(허용 오차는 정수 반올림 차이만) LLM 응답을 거부 — review row 를 생성하지 않고 Chapter 를 `in_review` 잔류시킨다. 이유: LLM 이 항목별 점수와 모순되는 총점을 던질 수 있어(예: 항목 평균 50 인데 총점 80 등) 본 명세의 (A) 약속을 코드에서 보강해야 한다. 본 검증을 명세 의무로 박는다.
-  3. (2) 가 통과하면 LLM 응답에서 `decision`, `quality_score` (= 재계산값), `feedback` 을 추출해 `pd.reviews(chapter_id, pd_version, decision, quality_score, feedback, created_at)` row 1건을 생성한다.
+  2. **LLM 응답에는 `quality_score` 가 없다.** pd 는 LLM 응답의 항목별 점수(`item_score_*`) 로부터 (A) 의 가중합 식을 적용해 `quality_score` 를 산출한다. 코드 단독 산출이므로 LLM 응답과의 불일치·거부 개념은 존재하지 않는다.
+  3. pd 는 (2) 의 `quality_score` 와 후술 Then-5 의 `decision` 산출 결과를, LLM 응답에서 추출한 `feedback` 과 함께 `pd.reviews(chapter_id, pd_version, decision, quality_score, feedback, created_at)` row 1건으로 영속한다.
   4. `decision` 은 `approve | reject | needs_revision` 중 하나이며 `quality_score` 는 0–100 (Data §1).
-  5. `decision` 산출 규칙: (B) 거부 게이트 (G1~G4) 트리거 시 → `needs_revision`; 그 외에는 (A) 점수 임계 (`>=80 approve / 60~79 needs_revision / <60 reject`) 적용.
+  5. **LLM 응답에는 `decision` 이 없다.** pd 는 LLM 응답의 `blockers` 와 (2) 의 `quality_score` 로부터 다음 규칙으로 `decision` 을 산출한다: `blockers` 가 비어 있지 않으면 (= (B) 거부 게이트 (G1~G4) 중 하나 이상 트리거) → `needs_revision`; 그 외에는 (A) 점수 임계 (`quality_score >= 80 → approve / 60 <= quality_score < 80 → needs_revision / quality_score < 60 → reject`) 적용.
   6. 동일 Chapter 에 대한 동시 검수는 직렬화된다 — 동일 in_review row 를 두 pd 인스턴스가 동시에 잡지 못한다 (구현: `FOR UPDATE SKIP LOCKED` 또는 어드바이저리 락, `[확인 필요]`).
-- **실패 케이스**: LLM 호출 실패, 응답이 (C) 스키마를 만족하지 못함, 또는 위 Then-2 의 가중합 재계산 불일치 — 어느 경우든 review row 를 생성하지 않는다. Chapter 는 `in_review` 로 잔류해 다음 cycle 에서 다시 pick up 된다.
+- **실패 케이스**: LLM 호출 실패 또는 응답이 (C) 스키마를 만족하지 못함 — 어느 경우든 review row 를 생성하지 않는다. Chapter 는 `in_review` 로 잔류해 다음 cycle 에서 다시 pick up 된다.
 
 ---
 
