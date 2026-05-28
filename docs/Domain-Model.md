@@ -2,7 +2,7 @@
 spec_type: Domain Model
 scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 (사람 UI·가상결제·좋아요는 범위 밖)
 status: 검증 대기
-updated_at: 2026-05-26
+updated_at: 2026-05-28
 references:
   - meta-specs/Domain-Meta-Spec-Info.md §Domain Model
   - WORLD.md §핵심 엔티티
@@ -320,7 +320,7 @@ pd가 한 차례 검수를 수행한 결과 1건.
 ### 4.5 작가 완성 판정 기준
 generator가 Chapter를 `draft → in_review`로 보낼 자격이 있다고 판단하려면 다음을 모두 만족해야 한다.
 
-1. **최소 글자 수 충족**: `[확인 필요]` — 사람이 채울 구체 수치.
+1. **최소 글자 수 충족**: 구체 수치는 §SRS-F-002 acceptance (a) 가 단일 source (재참조; 본 §4.5 에는 값을 박지 않는다). 도메인 규칙 차원에서는 "하한이 존재하며 미달 시 `draft → in_review` 전이 자격 없음" 만 강제한다.
 2. **회차 단위 서사 완결성 자체 점검 통과**: 도입–전개–훅 구조가 존재하는지, 본문 끝이 다음 회차로 이어지는 훅인지 등 자체 체크리스트. 구체 항목은 `[확인 필요]`.
 3. **WriterContext의 떡밥/일화와 모순 없음**: 본문이 `foreshadows`의 `paid_off` 상태나 `episodes`의 기 사실과 충돌하지 않는다.
 

@@ -61,6 +61,7 @@ references:
   2. `generator.draft_runs`에 해당 chapter_id, 모델/토큰/시간 메타 row가 생긴다.
   3. `generator.writer_contexts`의 `episodes` 또는 `foreshadows`가 LLM 출력 기반으로 갱신될 수 있다 (갱신은 동일 트랜잭션 내, `version`을 증가시킴 — Domain §4.4).
   4. 동일 Novel에 대한 다른 generator 호출과 충돌하지 않는다 (선행 acquire 또는 부분 유니크 인덱스가 거부).
+- **분량 지향**: 생성되는 본문은 **목표 4500~5000자** 를 지향한다 (웹소설 1회차 표준). 하한은 §SRS-F-002 (a) 의 4000자 — 미달 시 self-check 가 차단해 `draft` 잔류 후 rewrite 진행. 본 항은 generator 가 LLM 호출 시 분량 지시를 프롬프트에 실어야 함을 의미한다 (구체 프롬프트는 구현 책임).
 - 실패 케이스: LLM 호출 실패 시 chapter row를 만들지 않거나 별도 표시한다 (정책 `[확인 필요]`). draft_runs는 실패 메타만 남길 수 있다.
 
 ---
@@ -75,10 +76,10 @@ references:
 
 **acceptance**:
 - 완성 판정 항목:
-  - (a) 최소 글자 수 충족: `[확인 필요]` — 구체 수치는 사람이 채운다.
+  - (a) 최소 글자 수 충족: **4000자** (`LENGTH(content)` 단순 글자 수 기준; 공백 포함/미포함 구분하지 않는다). 웹소설 무료연재 신인 관행 (조아라 등 4000~4500자 공백 미포함) 에 맞춘 하한. 이 값 미만이면 본 완성 판정 미통과 → `draft` 잔류 (다음 generator cycle 에서 §SRS-F-007 rewrite 시도).
   - (b) 회차 단위 서사 완결성 자체 점검 통과: 도입–전개–훅 등 항목. 구체 체크리스트는 `[확인 필요]`.
   - (c) WriterContext의 `foreshadows`(paid_off 상태)·`episodes`(기 사실)와 본문 간 모순 없음.
-- **§SRS-F-003 와의 관계**: 본 (a)(b)(c) 는 generator 가 `draft → in_review` 전이 자격을 스스로 판단하기 위한 self-check 다. pd 검수(§SRS-F-003)는 같은 차원 — 최소 길이((a) = §F-003 (G2)), 회차 완결성((b) = §F-003 `item_score_completeness`), 일관성·premise((c) ⊂ §F-003 (G1)·(G3)) — 을 독립 rubric 으로 다시 평가한다. **§F-003 (G1) 이 reject 강제로 격상됨에 따라, 본 (c) self-check 는 generator 가 submit 전에 모순을 차단하는 1차 방어선의 의미가 강해진다 — (c) 가 통과한 채로 (G1) 이 트리거되면 같은 spec 위에서 rewrite 해도 회수 가능성이 낮으므로 pd 가 곧장 reject 한다 (SRS-F-003 (B) G1 참조).** 최소 글자 수만 같은 `[확인 필요]` 값을 가리키며(값 중복 박기 금지), 그 외 체크리스트(본 (b) generator self-check vs §F-003 (G4) pd 게이트)는 적용 주체·목적이 다르므로 각자의 `[확인 필요]` 를 가진다.
+- **§SRS-F-003 와의 관계**: 본 (a)(b)(c) 는 generator 가 `draft → in_review` 전이 자격을 스스로 판단하기 위한 self-check 다. pd 검수(§SRS-F-003)는 같은 차원 — 최소 길이((a) = §F-003 (G2)), 회차 완결성((b) = §F-003 `item_score_completeness`), 일관성·premise((c) ⊂ §F-003 (G1)·(G3)) — 을 독립 rubric 으로 다시 평가한다. **§F-003 (G1) 이 reject 강제로 격상됨에 따라, 본 (c) self-check 는 generator 가 submit 전에 모순을 차단하는 1차 방어선의 의미가 강해진다 — (c) 가 통과한 채로 (G1) 이 트리거되면 같은 spec 위에서 rewrite 해도 회수 가능성이 낮으므로 pd 가 곧장 reject 한다 (SRS-F-003 (B) G1 참조).** 최소 글자 수만 같은 값(본 (a) = 4000자)을 가리키며(§F-003 (G2) 가 본 (a) 를 재참조; 값 중복 박기 금지), 그 외 체크리스트(본 (b) generator self-check vs §F-003 (G4) pd 게이트)는 적용 주체·목적이 다르므로 각자의 `[확인 필요]` 를 가진다. **최소 길이의 경우 본 (a) self-check 를 통과해야 in_review 로 가므로 §F-003 (G2) 는 self-check 우회·버그·LLM 재생성 실패 등으로 4000자 미만이 새어 든 경우에만 트리거되는 2차 방어선 의미를 가진다 — G2 가 점수 게이트로 무력화된 죽은 게이트가 아니다.**
 - Given: SRS-F-001(fresh) 또는 SRS-F-007(rewrite) 로 본문이 채워진 `status='draft'` Chapter가 존재하고, 위 (a)(b)(c)를 모두 통과한다.
 - When: generator가 submit-for-review 동작을 수행한다.
 - Then:
@@ -116,7 +117,7 @@ references:
 다음 중 하나라도 트리거되면 `quality_score` 와 무관하게 `decision` 이 강제된다. 트리거된 사유는 LLM 응답의 `blockers` 배열에 문자열로 1개 이상 남는다. **G1 은 reject 강제 (모순은 rewrite 로 보완 불가), G2~G4 는 needs_revision 강제 (rewrite 로 보완 가능 영역).**
 
 - **(G1) — 트리거 시 `decision='reject'` 강제**: 캐릭터/세계관/설정이 직전 회차 또는 `StorySpec.character_list / StorySpec.premise` 와 모순. 인물·사건·설정 어느 하나라도 어긋나면 트리거. **격상 사유**: 모순은 같은 spec 위에서 rewrite 해도 동일 모순이 재발할 가능성이 높음 — 보완 가능한 약점이 아니라 spec 차원의 결함. rewrite 루프(SRS-F-007) 의 의도와도 정합.
-- **(G2) — 트리거 시 `decision='needs_revision'` 강제**: 본문이 최소 길이 미달 — 기준값은 **SRS-F-002 acceptance (a) 의 `[확인 필요]` 와 동일** (재참조; 본 §F-003 에는 값을 박지 않는다). rewrite 로 길이 보완 가능.
+- **(G2) — 트리거 시 `decision='needs_revision'` 강제**: 본문이 최소 길이 미달 — 기준값은 **SRS-F-002 acceptance (a) 의 값과 동일** (재참조; 본 §F-003 에는 값을 박지 않는다 — 값 중복 금지). rewrite 로 길이 보완 가능.
 - **(G3) — 트리거 시 `decision='needs_revision'` 강제**: 스토리 premise(`StorySpec.premise`) 와 어긋남.
 - **(G4) — 트리거 시 `decision='needs_revision'` 강제**: 그 외 "치명적 결함" — 작가가 의도하지 않은 명백한 오류 (예: 인물 이름이 본문 안에서 뒤바뀜, 시점 혼동, 문장 단위 붕괴 등). 구체 체크리스트는 `[확인 필요]`. **(G4) 는 pd 의 제3자 시각 게이트이며, SRS-F-002 (b) 의 generator self-check 기준과는 적용 주체·목적이 다르므로 같은 값을 가리키지 않는다.**
 
@@ -249,6 +250,7 @@ references:
      - `episodes`/`foreshadows` 갱신은 일어날 수 있다 (Domain §4.4, `version` 증가).
      - 어느 한 작업이 실패하면 전체 롤백.
   3. 후속 §SRS-F-002 완성 판정이 통과하면 `draft → in_review` 전이.
+- **분량 지향**: 재작성 본문도 §SRS-F-001 과 동일하게 **목표 4500~5000자 / 하한 4000자** (§SRS-F-002 (a)) 를 지향한다. **rewrite 의 의미**: 피드백 반영은 같은 분량 안에서 단어만 교체하는 게 아니라, 필요하면 새 사건·전개를 더해 목표 분량을 채우는 것까지 포함한다 (실측 발견: rewrite 가 분량을 안 늘려 점수 정체 사례). 본 항은 generator 가 rewrite LLM 호출 시 분량 지시 + "사건 추가 허용" 지시를 프롬프트에 실어야 함을 의미한다 (구체 프롬프트는 구현 책임).
 - 실패 케이스:
   - LLM 호출 실패 시 chapter row 갱신을 하지 않는다 (기존 content 보존). draft_runs 의 실패 메타 보관 여부는 SRS-F-001 과 동일 정책 `[확인 필요]`.
   - rewrite 결과가 §SRS-F-002 완성 판정 미통과 시 Chapter 는 `draft` 로 잔류하며 다음 generator cycle 에서 다시 rewrite 시도 (이때 `revision_count` 는 변하지 않음 — pd 가 증가시키는 값이므로).
