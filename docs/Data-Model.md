@@ -1,15 +1,15 @@
 ---
 spec_type: Data Model / Schema
-scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 (사람 UI·가상결제·좋아요는 범위 밖)
+scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 + 작가-PD 1:1 페어링 골격 (사람 UI·가상결제·좋아요는 범위 밖)
 status: 검증 대기
-updated_at: 2026-05-26
+updated_at: 2026-05-28
 references:
   - meta-specs/Architecture-Design-Meta-Spec-Info.md §Data Model
   - WORLD.md §핵심 엔티티, §공통 규칙
   - docs/Domain-Model.md
 ---
 
-# Data Model — 회차 생성·검수 + rewrite 루프 + AI 독자 댓글 줄기
+# Data Model — 회차 생성·검수 + rewrite 루프 + AI 독자 댓글 + 작가-PD 페어링 줄기
 
 > 이 문서는 [docs/Domain-Model.md](Domain-Model.md) 의 엔티티를 PostgreSQL 스키마로 구현한 결과를 명세한다.
 > 엔티티명은 Domain Model과 1:1로 대응한다(같은 이름은 같은 개념).
@@ -30,6 +30,7 @@ references:
 | `premise` | text | NOT NULL | |
 | `created_by_spec` | UUID | FK → `public.story_specs(id)` | |
 | `writer_id` | text | NOT NULL, FK → `generator.writers(id)` ON DELETE RESTRICT | 이 Novel을 쓰는 작가. cross-schema FK 허용(Novel의 본질적 속성). |
+| `assigned_pd_id` | text | NOT NULL, FK → `pd.pd_agents(id)` ON DELETE RESTRICT | 이 Novel 을 검수하는 PD. `writer_id` 와 동일 정당화 (cross-schema FK, Novel 의 본질적 속성). Novel 활성화 시점에 배정되어 종착까지 불변 (Domain §4.11). |
 | `status` | text | NOT NULL, CHECK ∈ {drafting, published, archived} | |
 | `created_at` | timestamptz | NOT NULL, default now() | UTC |
 | `updated_at` | timestamptz | NOT NULL, default now() | UTC |
@@ -124,6 +125,17 @@ generator의 LLM 호출 1회분 메타데이터. WORLD.md의 `Draft` 개념을 g
 | `llm_metadata` | jsonb | NOT NULL | 모델/토큰/소요시간/seed 등 |
 | `created_at` | timestamptz | NOT NULL | UTC |
 
+### `pd.pd_agents`
+PD 의 등록 정보. `public.novels.assigned_pd_id` 의 FK 대상. **`generator.writers` 와 달리 정체성 파일이 없다** — 본 줄기에서 PD 는 공통 rubric (SRS-F-003 (A)) 으로 동작하므로 인스턴스별 변별이 없다. 명부는 식별자와 활성 여부만 보유한다 (Domain §1 PdAgent, §4.11).
+
+| 컬럼 | 타입 | 키/제약 | 비고 |
+|---|---|---|---|
+| `id` | text | PK | PD 슬러그 (예: `pd-alpha`). 불변. |
+| `active` | boolean | NOT NULL, default true | 비활성 시 새 Novel 배정 불가. |
+| `created_at` | timestamptz | NOT NULL, default now() | UTC |
+
+> **정체성 본문 컬럼(`identity_path`) 부재**. 본 줄기에서 PD 는 공통 rubric 이므로 `generator.writers` / `viewer.reader_personas` 와 달리 정체성 디렉토리 참조가 없다. 향후 PD 별 정체성(SOUL · 검수 관점) 이 필요해지면 그때 `identity_path` 컬럼을 추가한다 (Navigator 빚). 본 명세에서 명부의 변별은 **`id` 슬러그만으로 충분** — pd 인스턴스가 자신을 `$self_pd_id` 로만 인지하고 폴링한다 (SRS-F-003 (E)).
+
 ### `pd.reviews`
 pd의 검수 결과 1건.
 
@@ -136,6 +148,8 @@ pd의 검수 결과 1건.
 | `quality_score` | int | NOT NULL, CHECK 0..100 | |
 | `feedback` | text | NOT NULL, default '' | |
 | `created_at` | timestamptz | NOT NULL | UTC |
+
+> **`pd_id` 컬럼 부재 — 본 줄기에서 의도된 선택**. Review row 에 어느 PdAgent 가 검수했는지 영속하지 않는다. Novel ↔ PdAgent 페어링(§4.11)이 불변이므로 `Review.chapter_id → Chapter.novel_id → Novel.assigned_pd_id` 경유로 사후 추적이 가능하다. **Novel 도중 PD 재배정이 도입되면 이 경유 추적이 무너지므로** `pd_id` 컬럼 추가가 필요해진다 (Navigator 빚).
 
 ### `viewer.reader_personas`
 AI 독자(reader-agent)의 등록 정보. 정체성 본문은 DB가 아닌 파일(viewer repo)에 있고, 본 테이블은 *어느 페르소나가 존재하고 어디서 정체성을 읽어와야 하는가*만 추적한다. `generator.writers`와 완전 대칭.
@@ -198,6 +212,7 @@ viewer의 LLM 호출 1회분 메타데이터. `generator.draft_runs` / `pd.revie
 ```
 story_specs (1) ─────────────▶ (N) novels
 writers     (1) ─────────────▶ (N) novels           (작가 1명이 여러 작품; 단 status='drafting'은 동시 1개 — §4.1)
+pd_agents   (1) ─────────────▶ (N) novels           (PD 1명이 여러 작품 이력; 단 status='drafting'은 동시 1개 — §4.1)
 novels (1) ──────────────────▶ (N) chapters
 novels (1) ──────────────────▶ (1) writer_contexts
 novels (1) ──────────────────▶ (N) episodes
@@ -232,6 +247,12 @@ comments (1) ────────────────▶ (1) comment_run
     ON public.novels (writer_id)
     WHERE status = 'drafting';
   ```
+- **한 PD 는 동시에 active 소설 1개** (Domain §4.11 — 1:1 페어링 골격): 부분 유니크 인덱스로 강제. active 기준은 `novels_one_active_per_writer` 와 동일하게 `Novel.status='drafting'` (Domain §4.7 정의 재사용).
+  ```sql
+  CREATE UNIQUE INDEX novels_one_active_per_pd
+    ON public.novels (assigned_pd_id)
+    WHERE status = 'drafting';
+  ```
 - **상태 전이 제약**: enum 차원의 값 제한은 enum이 보장. 허용 전이 그래프(§Domain 4.1)는 애플리케이션 레이어에서 검증(트리거로도 강제 가능 — `[확인 필요]`). 종착 상태(`published`, `abandoned`)에서의 진출 전이는 모두 거부된다.
 - **재시도 상한 (`revision_count` ↔ `status` 정합)**: `revision_count` 증가와 `in_review → draft` / `in_review → abandoned` 전이는 동일 트랜잭션에서 일어나야 한다 (Domain §4.6 / §4.10). MAX 값 자체는 DB CHECK 가 아닌 애플리케이션 설정으로 보유 (`[확인 필요 — 기본 3 권장]`).
 - **댓글 대상 published 제약** (Domain §4.8): `viewer.comments` INSERT 시 `public.chapters.status='published'` 인지 검증. 트리거(예: `BEFORE INSERT ON viewer.comments`) 또는 애플리케이션 레이어 (`[확인 필요]` — 트리거 비용 vs 보장 강도).
@@ -239,7 +260,7 @@ comments (1) ────────────────▶ (1) comment_run
 
 ### 4.2 폴링/조회 최적화 인덱스
 
-- **pd 폴링**: `INDEX (status, updated_at) ON public.chapters` — pd가 `WHERE status='in_review' ORDER BY updated_at` 쿼리를 효율적으로 수행하기 위함 (SRS-F-003).
+- **pd 폴링**: `INDEX (status, updated_at) ON public.chapters` — pd가 `WHERE status='in_review' ORDER BY updated_at` 쿼리를 효율적으로 수행하기 위함 (SRS-F-003). 본 줄기 SRS-F-009 (1:1 페어링) 으로 pd 폴링이 자기 담당 novel 의 in_review 만 본다 (`chapters` c JOIN `novels` n WHERE `n.assigned_pd_id = $self`). 1:1 페어링이라 한 PD 당 in_review 가 보통 0~1 개이므로 기존 `(status, updated_at)` 인덱스로 충분. JOIN 효율을 위한 추가 인덱스 (예: `(assigned_pd_id, status)` ON `public.novels`) 도입 여부는 `[확인 필요 — 코드 PR 측정 후 결정]`.
 - **viewer 폴링**: `INDEX (status, published_at) ON public.chapters` — viewer가 `WHERE status='published'` 회차를 효율적으로 조회하기 위함 (SRS-F-005). 신규 published를 시간순으로 훑거나 `published_at > $cursor` 페이지네이션에 사용.
 - **comments 검색**: `INDEX (chapter_id, created_at) ON viewer.comments` — 특정 회차의 댓글 시간순 조회.
 - **generator 다음 번호 조회**: `INDEX (novel_id, number) ON public.chapters` (위 UNIQUE 인덱스가 동일 효과를 가짐).
@@ -256,9 +277,9 @@ comments (1) ────────────────▶ (1) comment_run
 
 | 스키마 | 테이블 | 쓰기 권한 |
 |---|---|---|
-| `public` | `novels`, `chapters`, `story_specs` | admin/generator/pd가 정해진 컬럼만 쓰기 (Chapter.status 전이는 §SRS-F의 owner_module이 관할). `novels.writer_id`는 Novel 생성 시점에 배정. viewer는 `public.chapters` **읽기 전용** (SRS-F-005). |
+| `public` | `novels`, `chapters`, `story_specs` | admin/generator/pd가 정해진 컬럼만 쓰기 (Chapter.status 전이는 §SRS-F의 owner_module이 관할). `novels.writer_id` 와 `novels.assigned_pd_id` 는 Novel 생성 시점에 배정 (1:1 페어링, Domain §4.7 / §4.11). viewer는 `public.chapters` **읽기 전용** (SRS-F-005). |
 | `generator` | `writers`, `writer_contexts`, `episodes`, `foreshadows`, `draft_runs` | generator 전용 쓰기. 단 `writers`는 admin이 시드/활성 토글하고 generator는 읽기 전용. |
-| `pd` | `reviews` | pd 전용 쓰기 |
+| `pd` | `reviews`, `pd_agents` | `pd.reviews` 는 pd 전용 쓰기. `pd.pd_agents` 는 admin 이 시드/활성 토글하고 pd 는 읽기 전용 (`generator.writers` / `viewer.reader_personas` 와 동일 패턴). |
 | `viewer` | `reader_personas`, `comments`, `comment_runs` | viewer 전용 쓰기. 단 `reader_personas`는 admin이 시드/활성 토글하고 viewer는 읽기 전용 (`writers`와 동일 패턴). |
 
 읽기는 어느 서비스에서도 가능. 다른 서비스 스키마에 쓰기를 시도하면 안 된다 (Phase 1 정책).
@@ -324,3 +345,22 @@ viewer는 SQLAlchemy로 `public.chapters`(읽기) + `viewer.*`(쓰기)에 직접
     2. enum 값 제거는 Postgres 가 직접 지원하지 않으므로 새 enum 타입 생성 → 컬럼 타입 변환 → 기존 타입 DROP 순서. 또는 enum 값을 "사용 안 함"으로만 표시하고 제거는 후속 마이그레이션으로 보류.
     3. 결정·절차는 별도 ADR 권장 (대안: `approved` 값을 코드에서만 거부하고 enum 에는 유지).
   - `chapter_status` enum 값 제거: `rejected` (본 줄기 미사용). **본 마이그레이션에서는 제거하지 않는다** — 후속 빚 (Navigator 기록).
+
+### 7.2 walking skeleton 4단계 (작가-PD 1:1 페어링 골격) 마이그레이션 항목
+
+> 본 항목은 명세이며 실제 SQL 파일 (`db/migrations/2026-05-pairing.sql` 또는 적절한 이름) 의 작성·적용은 **별도 코드 PR** 책임이다. 본 문서는 SQL 본문의 **구조와 절차** 만 정의한다 (§7.1 패턴 답습).
+
+- **Additive — 자동 적용 가능 (idempotent)**:
+  - `pd.pd_agents` 테이블 신규 생성 (`CREATE TABLE IF NOT EXISTS pd.pd_agents (id text PRIMARY KEY, active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now());`).
+  - `public.novels.assigned_pd_id` 컬럼 추가 (`ALTER TABLE public.novels ADD COLUMN IF NOT EXISTS assigned_pd_id text;`) — 우선 nullable 로 추가, 백필 후 NOT NULL 부착.
+  - FK 제약 추가 (`pg_constraint` 존재 체크 후 `ALTER TABLE public.novels ADD CONSTRAINT novels_assigned_pd_id_fkey FOREIGN KEY (assigned_pd_id) REFERENCES pd.pd_agents(id) ON DELETE RESTRICT;`. `2026-05-rewrite.sql` 의 `chapters_revision_count_check` 패턴 답습 — `DO $$ BEGIN IF NOT EXISTS ... END$$;`).
+  - 부분 유니크 인덱스 `novels_one_active_per_pd` (`CREATE UNIQUE INDEX IF NOT EXISTS novels_one_active_per_pd ON public.novels (assigned_pd_id) WHERE status = 'drafting';`).
+
+- **NOT NULL 강제 절차** (Additive 안에서 마지막 단계):
+  1. **사전**: `pd.pd_agents` 에 active=true PD row 1건 이상 시드 (예: `INSERT INTO pd.pd_agents (id) VALUES ('pd-alpha') ON CONFLICT DO NOTHING;`).
+  2. **백필**: 기존 `public.novels` row 가 있다면 `UPDATE public.novels SET assigned_pd_id = '<seed_pd_id>' WHERE assigned_pd_id IS NULL;` 로 채운다. 배정 알고리즘은 본 줄기 범위 밖이므로 마이그레이션 시점에는 단일 시드 PD 로 일괄 백필이 자연스럽다. 실 데이터가 비어있으면 (개발 DB 초기 상태) 본 단계 생략 가능.
+  3. **NOT NULL 부착**: `ALTER TABLE public.novels ALTER COLUMN assigned_pd_id SET NOT NULL;` (재실행 안전 — 이미 NOT NULL 이면 PG 가 무시).
+
+- **시드 순서 제약**: 본 마이그레이션 적용 후 새 Novel 을 생성하려면 `pd.pd_agents` 가 비어있지 않아야 한다. 기존 `generator.writers` 시드와 동일한 운영 절차로 admin 이 PD 명부를 먼저 시드한다. PD 명부 부족 시 운영 정책(대기열 / 알림 / 수동 배정) 은 본 줄기 범위 밖 (Navigator 빚).
+
+- **Destructive — 없음**. 본 줄기는 컬럼 삭제·타입 변경·enum 값 제거 없이 Additive 만으로 완료된다.
