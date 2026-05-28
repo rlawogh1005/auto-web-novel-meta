@@ -78,7 +78,7 @@ references:
   - (a) 최소 글자 수 충족: `[확인 필요]` — 구체 수치는 사람이 채운다.
   - (b) 회차 단위 서사 완결성 자체 점검 통과: 도입–전개–훅 등 항목. 구체 체크리스트는 `[확인 필요]`.
   - (c) WriterContext의 `foreshadows`(paid_off 상태)·`episodes`(기 사실)와 본문 간 모순 없음.
-- **§SRS-F-003 와의 관계**: 본 (a)(b)(c) 는 generator 가 `draft → in_review` 전이 자격을 스스로 판단하기 위한 self-check 다. pd 검수(§SRS-F-003)는 같은 차원 — 최소 길이((a) = §F-003 (G2)), 회차 완결성((b) = §F-003 `item_score_completeness`), 일관성·premise((c) ⊂ §F-003 (G1)·(G3)) — 을 독립 rubric 으로 다시 평가한다. 최소 글자 수만 같은 `[확인 필요]` 값을 가리키며(값 중복 박기 금지), 그 외 체크리스트(본 (b) generator self-check vs §F-003 (G4) pd 게이트)는 적용 주체·목적이 다르므로 각자의 `[확인 필요]` 를 가진다.
+- **§SRS-F-003 와의 관계**: 본 (a)(b)(c) 는 generator 가 `draft → in_review` 전이 자격을 스스로 판단하기 위한 self-check 다. pd 검수(§SRS-F-003)는 같은 차원 — 최소 길이((a) = §F-003 (G2)), 회차 완결성((b) = §F-003 `item_score_completeness`), 일관성·premise((c) ⊂ §F-003 (G1)·(G3)) — 을 독립 rubric 으로 다시 평가한다. **§F-003 (G1) 이 reject 강제로 격상됨에 따라, 본 (c) self-check 는 generator 가 submit 전에 모순을 차단하는 1차 방어선의 의미가 강해진다 — (c) 가 통과한 채로 (G1) 이 트리거되면 같은 spec 위에서 rewrite 해도 회수 가능성이 낮으므로 pd 가 곧장 reject 한다 (SRS-F-003 (B) G1 참조).** 최소 글자 수만 같은 `[확인 필요]` 값을 가리키며(값 중복 박기 금지), 그 외 체크리스트(본 (b) generator self-check vs §F-003 (G4) pd 게이트)는 적용 주체·목적이 다르므로 각자의 `[확인 필요]` 를 가진다.
 - Given: SRS-F-001(fresh) 또는 SRS-F-007(rewrite) 로 본문이 채워진 `status='draft'` Chapter가 존재하고, 위 (a)(b)(c)를 모두 통과한다.
 - When: generator가 submit-for-review 동작을 수행한다.
 - Then:
@@ -101,23 +101,24 @@ references:
 #### (A) 검수 기준 (rubric)
 
 - 항목 4개와 가중치 (합 = 100): `재미·몰입 35 / 문장 품질 20 / 캐릭터·세계관 일관성 20 / 회차 완결성 25`.
-- 점수 앵커 (각 항목 0–100 점수 산정 시 LLM 이 동일하게 적용):
-  - **90+**: 결함 거의 없고 다음 회차 안 보면 답답할 정도의 훅. 드물게 줌.
-  - **75~89**: 잘 썼지만 한두 군데 약점. 발행 가치 있음.
-  - **60~74**: 무난·평범. needs_revision 기본값.
+- 점수 앵커 (각 항목 0–100 점수 산정 시 LLM 이 동일하게 적용). **"발행 가치" 의 의미를 좁힌다 — 80 이상 approve 영역은 장르 상위 30% 급. 무난한 글은 60~79 needs_revision 영역에 떨어져야 정상**:
+  - **90~100**: 장르 최상위. 거의 결함 없고 강한 훅. 매우 드물게 줌.
+  - **80~89**: 장르 상위 30% 급. 명확한 강점 + 약점 1~2개 이내. approve 가능 영역.
+  - **70~79**: 평균보다 조금 나음. 강점 있지만 약점도 분명. needs_revision 기본값.
+  - **60~69**: 평범. 명백한 약점 있음. needs_revision 권장.
   - **40~59**: 약점 분명. reject.
   - **0~39**: 명백한 결함. reject.
 - 총점 산출: `quality_score = round(0.35·item_score_fun + 0.20·item_score_prose + 0.20·item_score_consistency + 0.25·item_score_completeness)`. 0–100 범위.
-- decision 임계 (점수 기반): `quality_score >= 80` → `approve` / `60 <= quality_score < 80` → `needs_revision` / `quality_score < 60` → `reject`. **단 (B) 거부 게이트가 우선**.
+- decision 임계 (점수 기반): `quality_score >= 80` → `approve` / `60 <= quality_score < 80` → `needs_revision` / `quality_score < 60` → `reject`. 임계 수치 자체는 변경 없으나 **앵커 격상으로 의미가 격상됨 — `>=80 approve` 는 "장르 상위 30% 급" 을 뜻하며, 무난한 글은 60~79 영역에 떨어진다**. **단 (B) 거부 게이트가 우선**.
 
-#### (B) 거부 게이트 (점수 무관, 트리거 시 강제 `needs_revision`)
+#### (B) 거부 게이트 (점수 무관, 트리거 시 `decision` 강제)
 
-다음 중 하나라도 트리거되면 `quality_score` 와 무관하게 `decision='needs_revision'` 으로 강제한다. 트리거된 사유는 LLM 응답의 `blockers` 배열에 문자열로 1개 이상 남는다.
+다음 중 하나라도 트리거되면 `quality_score` 와 무관하게 `decision` 이 강제된다. 트리거된 사유는 LLM 응답의 `blockers` 배열에 문자열로 1개 이상 남는다. **G1 은 reject 강제 (모순은 rewrite 로 보완 불가), G2~G4 는 needs_revision 강제 (rewrite 로 보완 가능 영역).**
 
-- **(G1)** 캐릭터/세계관이 직전 회차 또는 `StorySpec.character_list / StorySpec.premise` 와 모순.
-- **(G2)** 본문이 최소 길이 미달 — 기준값은 **SRS-F-002 acceptance (a) 의 `[확인 필요]` 와 동일** (재참조; 본 §F-003 에는 값을 박지 않는다).
-- **(G3)** 스토리 premise(`StorySpec.premise`) 와 어긋남.
-- **(G4)** 그 외 "치명적 결함" — 작가가 의도하지 않은 명백한 오류 (예: 인물 이름이 본문 안에서 뒤바뀜, 시점 혼동, 문장 단위 붕괴 등). 구체 체크리스트는 `[확인 필요]`. **(G4) 는 pd 의 제3자 시각 게이트이며, SRS-F-002 (b) 의 generator self-check 기준과는 적용 주체·목적이 다르므로 같은 값을 가리키지 않는다.**
+- **(G1) — 트리거 시 `decision='reject'` 강제**: 캐릭터/세계관/설정이 직전 회차 또는 `StorySpec.character_list / StorySpec.premise` 와 모순. 인물·사건·설정 어느 하나라도 어긋나면 트리거. **격상 사유**: 모순은 같은 spec 위에서 rewrite 해도 동일 모순이 재발할 가능성이 높음 — 보완 가능한 약점이 아니라 spec 차원의 결함. rewrite 루프(SRS-F-007) 의 의도와도 정합.
+- **(G2) — 트리거 시 `decision='needs_revision'` 강제**: 본문이 최소 길이 미달 — 기준값은 **SRS-F-002 acceptance (a) 의 `[확인 필요]` 와 동일** (재참조; 본 §F-003 에는 값을 박지 않는다). rewrite 로 길이 보완 가능.
+- **(G3) — 트리거 시 `decision='needs_revision'` 강제**: 스토리 premise(`StorySpec.premise`) 와 어긋남.
+- **(G4) — 트리거 시 `decision='needs_revision'` 강제**: 그 외 "치명적 결함" — 작가가 의도하지 않은 명백한 오류 (예: 인물 이름이 본문 안에서 뒤바뀜, 시점 혼동, 문장 단위 붕괴 등). 구체 체크리스트는 `[확인 필요]`. **(G4) 는 pd 의 제3자 시각 게이트이며, SRS-F-002 (b) 의 generator self-check 기준과는 적용 주체·목적이 다르므로 같은 값을 가리키지 않는다.**
 
 #### (C) LLM 응답 스키마 (pd 가 LLM 에게 강제하는 출력 형식)
 
@@ -136,7 +137,7 @@ references:
 
 본 SRS 범위에서 `pd.reviews` row 에 영속되는 컬럼은 기존대로 `(chapter_id, pd_version, decision, quality_score, feedback, created_at)` 다 (Data Model §1 변경 없음). **항목별 점수·`blockers` 영속화는 `[확인 필요 — Data Model §pd.reviews 컬럼 추가, 사후 분석용]`.**
 
-**한계 (후속 빚으로 인식)**: (A)·(B) 산출은 본 개정에서 코드 단독 책임이 됐으므로 "식이 제대로 적용됐는지" 의문은 명세 수준에서 해소됐다. 다만 **입력값인 항목별 점수(`item_score_fun / prose / consistency / completeness`) 와 `blockers` 가 DB 에 영속되지 않으므로**, `pd.reviews` row 에 저장된 `quality_score` 가 어떤 항목 조합에서 나왔는지, 어떤 거부 게이트가 트리거돼 `decision='needs_revision'` 으로 강제됐는지 사후에 추적할 수 없다. 자유 텍스트 `feedback` 안에 사유가 들어 있을 거라는 약한 가정에 의존한다. 항목별 점수·`blockers` 컬럼이 추가될 때까지 본 한계는 그대로 남는다.
+**한계 (후속 빚으로 인식)**: (A)·(B) 산출은 본 개정에서 코드 단독 책임이 됐으므로 "식이 제대로 적용됐는지" 의문은 명세 수준에서 해소됐다. 다만 **입력값인 항목별 점수(`item_score_fun / prose / consistency / completeness`) 와 `blockers` 가 DB 에 영속되지 않으므로**, `pd.reviews` row 에 저장된 `quality_score` 가 어떤 항목 조합에서 나왔는지, 어떤 거부 게이트가 트리거돼 `decision` 이 `'reject'` (G1) 또는 `'needs_revision'` (G2~G4) 으로 강제됐는지 사후에 추적할 수 없다. 자유 텍스트 `feedback` 안에 사유가 들어 있을 거라는 약한 가정에 의존한다. 항목별 점수·`blockers` 컬럼이 추가될 때까지 본 한계는 그대로 남는다.
 
 #### (E) Given / When / Then
 
@@ -147,7 +148,12 @@ references:
   2. **LLM 응답에는 `quality_score` 가 없다.** pd 는 LLM 응답의 항목별 점수(`item_score_*`) 로부터 (A) 의 가중합 식을 적용해 `quality_score` 를 산출한다. 코드 단독 산출이므로 LLM 응답과의 불일치·거부 개념은 존재하지 않는다.
   3. pd 는 (2) 의 `quality_score` 와 후술 Then-5 의 `decision` 산출 결과를, LLM 응답에서 추출한 `feedback` 과 함께 `pd.reviews(chapter_id, pd_version, decision, quality_score, feedback, created_at)` row 1건으로 영속한다.
   4. `decision` 은 `approve | reject | needs_revision` 중 하나이며 `quality_score` 는 0–100 (Data §1).
-  5. **LLM 응답에는 `decision` 이 없다.** pd 는 LLM 응답의 `blockers` 와 (2) 의 `quality_score` 로부터 다음 규칙으로 `decision` 을 산출한다: `blockers` 가 비어 있지 않으면 (= (B) 거부 게이트 (G1~G4) 중 하나 이상 트리거) → `needs_revision`; 그 외에는 (A) 점수 임계 (`quality_score >= 80 → approve / 60 <= quality_score < 80 → needs_revision / quality_score < 60 → reject`) 적용.
+  5. **LLM 응답에는 `decision` 이 없다.** pd 는 LLM 응답의 `blockers` 와 (2) 의 `quality_score` 로부터 다음 규칙으로 `decision` 을 산출한다 — **(B) 게이트의 G1/G2~G4 분리에 맞춰 우선순위 적용**:
+     - (i) `blockers` 중 G1 사유(캐릭터/세계관/설정 모순)가 1개 이상이면 → `reject` (점수 무관).
+     - (ii) (i) 에 해당하지 않고 `blockers` 가 비어 있지 않으면 (= G2/G3/G4 중 하나 이상 트리거) → `needs_revision` (점수 무관).
+     - (iii) `blockers` 가 비어 있으면 → (A) 점수 임계 (`quality_score >= 80 → approve / 60 <= quality_score < 80 → needs_revision / quality_score < 60 → reject`) 적용.
+
+     **G1 사유 식별**: `blockers` 배열의 문자열에서 G1 트리거 여부를 코드가 판별 가능해야 한다. 본 SRS 에서는 식별 방식 자체는 `[확인 필요 — 구현 시 LLM 응답 스키마 보조 필드(예: blocker_codes) 추가 또는 prompt 측 prefix 약속]`. LLM 이 자유 텍스트로만 사유를 적으면 G1/G2~G4 분기가 불가능하므로 본 SRS 개정 이후 코드 PR 에서 같이 해결한다.
   6. 동일 Chapter 에 대한 동시 검수는 직렬화된다 — 동일 in_review row 를 두 pd 인스턴스가 동시에 잡지 못한다 (구현: `FOR UPDATE SKIP LOCKED` 또는 어드바이저리 락, `[확인 필요]`).
 - **실패 케이스**: LLM 호출 실패 또는 응답이 (C) 스키마를 만족하지 못함 — 어느 경우든 review row 를 생성하지 않는다. Chapter 는 `in_review` 로 잔류해 다음 cycle 에서 다시 pick up 된다.
 
