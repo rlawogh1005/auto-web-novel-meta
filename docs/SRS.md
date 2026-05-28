@@ -2,7 +2,7 @@
 spec_type: SRS (Software Requirements Specification)
 scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 (사람 UI·가상결제·좋아요는 범위 밖)
 status: 검증 대기
-updated_at: 2026-05-26
+updated_at: 2026-05-28
 references:
   - meta-specs/Product-Requirements-Meta-Spec-Info.md §SRS
   - docs/Domain-Model.md
@@ -78,6 +78,7 @@ references:
   - (a) 최소 글자 수 충족: `[확인 필요]` — 구체 수치는 사람이 채운다.
   - (b) 회차 단위 서사 완결성 자체 점검 통과: 도입–전개–훅 등 항목. 구체 체크리스트는 `[확인 필요]`.
   - (c) WriterContext의 `foreshadows`(paid_off 상태)·`episodes`(기 사실)와 본문 간 모순 없음.
+- **§SRS-F-003 와의 관계**: 본 (a)(b)(c) 는 generator 가 `draft → in_review` 전이 자격을 스스로 판단하기 위한 self-check 다. pd 검수(§SRS-F-003)는 같은 차원 — 최소 길이((a) = §F-003 (G2)), 회차 완결성((b) = §F-003 `item_score_completeness`), 일관성·premise((c) ⊂ §F-003 (G1)·(G3)) — 을 독립 rubric 으로 다시 평가한다. 최소 글자 수만 같은 `[확인 필요]` 값을 가리키며(값 중복 박기 금지), 그 외 체크리스트(본 (b) generator self-check vs §F-003 (G4) pd 게이트)는 적용 주체·목적이 다르므로 각자의 `[확인 필요]` 를 가진다.
 - Given: SRS-F-001(fresh) 또는 SRS-F-007(rewrite) 로 본문이 채워진 `status='draft'` Chapter가 존재하고, 위 (a)(b)(c)를 모두 통과한다.
 - When: generator가 submit-for-review 동작을 수행한다.
 - Then:
@@ -96,13 +97,57 @@ references:
 **owner_module**: `MOD-PD`
 
 **acceptance**:
-- Given: `public.chapters`에 `status='in_review'`인 row가 1개 이상 존재한다.
-- When: pd의 폴링 cycle이 실행된다.
-- Then:
-  1. 각 in_review Chapter에 대해 `pd.reviews`에 `(chapter_id, pd_version, decision, quality_score, feedback, created_at)` row가 생성된다.
-  2. `decision`은 `approve | reject | needs_revision` 중 하나이며 `quality_score`는 0–100 범위(Data §1).
-  3. 같은 Chapter에 대한 동시 검수는 직렬화된다 — 동일 in_review row를 두 pd 인스턴스가 동시에 잡지 못한다 (구현: `FOR UPDATE SKIP LOCKED` 또는 어드바이저리 락, `[확인 필요]`).
-- 실패 케이스: LLM 호출 실패 시 review row를 생성하지 않는다. Chapter는 `in_review`로 잔류해 다음 cycle에서 다시 pick up 된다.
+
+#### (A) 검수 기준 (rubric)
+
+- 항목 4개와 가중치 (합 = 100): `재미·몰입 35 / 문장 품질 20 / 캐릭터·세계관 일관성 20 / 회차 완결성 25`.
+- 점수 앵커 (각 항목 0–100 점수 산정 시 LLM 이 동일하게 적용):
+  - **90+**: 결함 거의 없고 다음 회차 안 보면 답답할 정도의 훅. 드물게 줌.
+  - **75~89**: 잘 썼지만 한두 군데 약점. 발행 가치 있음.
+  - **60~74**: 무난·평범. needs_revision 기본값.
+  - **40~59**: 약점 분명. reject.
+  - **0~39**: 명백한 결함. reject.
+- 총점 산출: `quality_score = round(0.35·item_score_fun + 0.20·item_score_prose + 0.20·item_score_consistency + 0.25·item_score_completeness)`. 0–100 범위.
+- decision 임계 (점수 기반): `quality_score >= 80` → `approve` / `60 <= quality_score < 80` → `needs_revision` / `quality_score < 60` → `reject`. **단 (B) 거부 게이트가 우선**.
+
+#### (B) 거부 게이트 (점수 무관, 트리거 시 강제 `needs_revision`)
+
+다음 중 하나라도 트리거되면 `quality_score` 와 무관하게 `decision='needs_revision'` 으로 강제한다. 트리거된 사유는 LLM 응답의 `blockers` 배열에 문자열로 1개 이상 남는다.
+
+- **(G1)** 캐릭터/세계관이 직전 회차 또는 `StorySpec.character_list / StorySpec.premise` 와 모순.
+- **(G2)** 본문이 최소 길이 미달 — 기준값은 **SRS-F-002 acceptance (a) 의 `[확인 필요]` 와 동일** (재참조; 본 §F-003 에는 값을 박지 않는다).
+- **(G3)** 스토리 premise(`StorySpec.premise`) 와 어긋남.
+- **(G4)** 그 외 "치명적 결함" — 작가가 의도하지 않은 명백한 오류 (예: 인물 이름이 본문 안에서 뒤바뀜, 시점 혼동, 문장 단위 붕괴 등). 구체 체크리스트는 `[확인 필요]`. **(G4) 는 pd 의 제3자 시각 게이트이며, SRS-F-002 (b) 의 generator self-check 기준과는 적용 주체·목적이 다르므로 같은 값을 가리키지 않는다.**
+
+#### (C) LLM 응답 스키마 (pd 가 LLM 에게 강제하는 출력 형식)
+
+- `item_score_fun`: 0–100. 재미·몰입.
+- `item_score_prose`: 0–100. 문장 품질.
+- `item_score_consistency`: 0–100. 캐릭터·세계관 일관성.
+- `item_score_completeness`: 0–100. 회차 완결성 (도입–전개–훅 — SRS-F-002 (b) 의 self-check 와 동일 차원을 pd 가 독립 평가).
+- `blockers`: `string[]`. 트리거된 거부 게이트 사유 (없으면 빈 배열).
+- `quality_score`: 0–100. (A) 의 가중합으로 산출. 거부 게이트와 독립.
+- `decision`: `approve | reject | needs_revision`. (A) 점수 임계와 (B) 거부 게이트를 적용한 최종 판정.
+- `feedback`: 자유 텍스트. reject/needs_revision 시 generator 가 다음 rewrite 입력으로 사용.
+
+#### (D) `pd.reviews` 영속 필드 — 본 개정에서 무변경
+
+본 SRS 범위에서 `pd.reviews` row 에 영속되는 컬럼은 기존대로 `(chapter_id, pd_version, decision, quality_score, feedback, created_at)` 다 (Data Model §1 변경 없음). **항목별 점수·`blockers` 영속화는 `[확인 필요 — Data Model §pd.reviews 컬럼 추가, 사후 분석용]`.**
+
+**한계 (후속 빚으로 인식)**: (A) 의 `quality_score` 가중합 계산식은 본 명세의 약속이지만, **입력값인 항목별 점수(`item_score_fun / prose / consistency / completeness`) 가 DB 에 영속되지 않으므로 사후에 식이 제대로 적용됐는지 검증할 수 없다.** `blockers` 도 동일 — 어떤 거부 게이트가 트리거됐는지 `pd.reviews` row 만 보고는 알 수 없고, 자유 텍스트 `feedback` 안에 사유가 들어 있을 거라는 약한 가정에 의존한다. 항목별 점수·`blockers` 컬럼이 추가될 때까지 본 한계는 그대로 남는다.
+
+#### (E) Given / When / Then
+
+- **Given**: `public.chapters` 에 `status='in_review'` 인 row 가 1개 이상 존재한다.
+- **When**: pd 의 폴링 cycle 이 실행된다.
+- **Then**:
+  1. 각 in_review Chapter 에 대해 pd 는 (C) 의 LLM 응답 스키마에 맞춰 LLM(WORLD §LLM 호출 규칙) 을 호출한다.
+  2. **pd 는 LLM 응답의 `quality_score` 를 그대로 신뢰하지 않는다.** 코드에서 (A) 의 가중합 식을 항목별 점수(`item_score_*`) 로부터 재계산하고, 재계산값과 LLM 응답 `quality_score` 가 일치하지 않으면(허용 오차는 정수 반올림 차이만) LLM 응답을 거부 — review row 를 생성하지 않고 Chapter 를 `in_review` 잔류시킨다. 이유: LLM 이 항목별 점수와 모순되는 총점을 던질 수 있어(예: 항목 평균 50 인데 총점 80 등) 본 명세의 (A) 약속을 코드에서 보강해야 한다. 본 검증을 명세 의무로 박는다.
+  3. (2) 가 통과하면 LLM 응답에서 `decision`, `quality_score` (= 재계산값), `feedback` 을 추출해 `pd.reviews(chapter_id, pd_version, decision, quality_score, feedback, created_at)` row 1건을 생성한다.
+  4. `decision` 은 `approve | reject | needs_revision` 중 하나이며 `quality_score` 는 0–100 (Data §1).
+  5. `decision` 산출 규칙: (B) 거부 게이트 (G1~G4) 트리거 시 → `needs_revision`; 그 외에는 (A) 점수 임계 (`>=80 approve / 60~79 needs_revision / <60 reject`) 적용.
+  6. 동일 Chapter 에 대한 동시 검수는 직렬화된다 — 동일 in_review row 를 두 pd 인스턴스가 동시에 잡지 못한다 (구현: `FOR UPDATE SKIP LOCKED` 또는 어드바이저리 락, `[확인 필요]`).
+- **실패 케이스**: LLM 호출 실패, 응답이 (C) 스키마를 만족하지 못함, 또는 위 Then-2 의 가중합 재계산 불일치 — 어느 경우든 review row 를 생성하지 않는다. Chapter 는 `in_review` 로 잔류해 다음 cycle 에서 다시 pick up 된다.
 
 ---
 
