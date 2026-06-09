@@ -1,8 +1,8 @@
 ---
 spec_type: SRS (Software Requirements Specification)
-scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 + 작가-PD 1:1 페어링 골격 (사람 UI·가상결제·좋아요는 범위 밖)
+scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 + 작가-PD 1:1 페어링 골격 + 사람 대면 공개 읽기 API (app-back) (사람 좋아요/댓글·가상결제는 범위 밖)
 status: 검증 대기
-updated_at: 2026-05-28
+updated_at: 2026-06-09
 references:
   - meta-specs/Product-Requirements-Meta-Spec-Info.md §SRS
   - docs/Domain-Model.md
@@ -18,10 +18,11 @@ references:
 > 2. **AI 독자 댓글 줄기 (walking skeleton 2단계)** — published 회차에 AI 독자(reader-agent)가 댓글을 단다.
 > 3. **rewrite 루프 줄기 (walking skeleton 3단계)** — pd reject 시 generator 가 피드백을 받아 같은 draft 의 본문을 재작성한다. 무한 루프를 방지하기 위해 재시도 상한을 두고 도달 시 `abandoned` 로 종착한다.
 > 4. **작가-PD 1:1 페어링 골격 (walking skeleton 4단계)** — Novel 마다 담당 PD 1명이 배정되고, 각 PD 는 자기 담당 novel 의 in_review 만 검수한다. PD 별 정체성(SOUL) 없음 — 공통 rubric (SRS-F-003 (A)) 적용. **시너지 (담당 PD 가 그 작가 이력을 검수 입력에 주입) 는 본 명세 범위 밖** — 다음 줄기.
+> 5. **사람 대면 공개 읽기 API (확장 1 — 사람 관람)** — 전용 백엔드 app-back 이 발행된 소설·회차·AI 독자 댓글을 read-only HTTP API 로 사람 클라이언트(web-app-front·mobile-app)에 서빙한다. SoC 로 viewer(자율 reader-agents)에서 분리됨 (WORLD.md 2026-06-09). **사람 사용자의 좋아요·댓글 작성은 본 명세 범위 밖** — 확장 2.
 >
-> NFR(성능·보안·가용성)과 다른 줄기(사람 UI 좋아요/댓글, 독자 가상결제)는 본 명세 범위 밖이다.
+> NFR(성능·보안·가용성)과 다른 줄기(사람 UI 좋아요/댓글 작성, 독자 가상결제)는 본 명세 범위 밖이다.
 
-> **PRD-US 매핑 안내**: SRS-F-001~004 / SRS-F-007 / SRS-F-008 / SRS-F-009 는 PRD-US-01/02 (작가·PD)에 매핑된다. SRS-F-005~006은 PRD-US-03 (독자) 중 **댓글 부분**에만 매핑된다 — 가상결제·좋아요는 향후 SRS, 미작성.
+> **PRD-US 매핑 안내**: SRS-F-001~004 / SRS-F-007 / SRS-F-008 / SRS-F-009 는 PRD-US-01/02 (작가·PD)에 매핑된다. SRS-F-005~006은 PRD-US-03 (독자) 중 **댓글 부분**에만 매핑된다 — 가상결제·좋아요는 향후 SRS, 미작성. SRS-F-010 은 PRD-US-04 (사람 관람) 중 **읽기 부분**에 매핑된다 — 사람 좋아요·댓글 작성은 향후 SRS, 미작성.
 
 ---
 
@@ -312,6 +313,41 @@ references:
 
 ---
 
+### SRS-F-010 — 사람 대면 공개 읽기 API (app-back)
+
+**설명**: app-back 은 발행된 소설·회차·AI 독자 댓글을 사람 클라이언트(web-app-front·mobile-app)에 **read-only HTTP API** 로 서빙한다. 쓰기·LLM 없음. `status='published'` 회차만 노출하고 draft/in_review/rejected/abandoned 는 숨긴다. `public.novels`·`public.chapters`·`viewer.comments` 를 **읽기 전용**으로 접근한다 — 데이터의 쓰기 소유는 각 서비스(generator/pd/viewer)에 있고 app-back 은 서빙 계층이다. SoC 로 viewer(자율 reader-agents)에서 서빙 책임을 분리한 결과 (WORLD.md 2026-06-09). 클라이언트는 DB 에 직접 접근하지 않고 app-back API 로만 읽는다.
+
+**maps_to_prd**: `PRD-US-04` (관람 부분 슬라이스 — 사람 사용자의 좋아요·댓글 작성은 본 SRS 범위 밖)
+
+**owner_module**: `MOD-APP-BACK`
+
+**acceptance**:
+
+#### 엔드포인트 계약
+
+- `GET /novels` → `[{id, title, genre, premise, chapter_count, latest_chapter_number}]`. **발행 회차(status='published')가 1개 이상인 소설만**. 최신 발행 회차 시각 desc 정렬.
+- `GET /novels/{id}` → `{id, title, genre, premise, chapters: [{number, title, chapter_id}]}`. 발행 회차만 number asc. 소설 미존재 또는 발행 회차 0개 → `404`.
+- `GET /novels/{id}/chapters/{n}` → `{chapter_id, novel_id, novel_title, number, title, content, prev_number, next_number}`. 미발행/미존재 회차 → `404`. `prev_number`/`next_number` 는 **실제 인접 발행 회차 번호** (abandoned 로 인한 번호 갭에 안전 — number±1 이 아님), 없으면 `null`.
+- `GET /chapters/{id}/comments` → `[{persona_id, content, created_at}]`. created_at asc. (persona_id 는 미래 사람 댓글 대비 nullable.)
+
+#### Given / When / Then
+
+- **Given**: `public.chapters` 에 `status='published'` 회차가 1개 이상 존재하고, 일부 회차에 `viewer.comments` 가 존재한다.
+- **When**: 사람 클라이언트가 위 엔드포인트를 호출한다.
+- **Then**:
+  1. published 회차·그 소유 소설만 노출되고, draft/in_review/rejected/abandoned 회차와 발행 회차 0개인 소설은 목록·상세에서 제외된다.
+  2. 미존재 소설/회차, 미발행 회차 요청은 `404`.
+  3. 정렬·인접 규칙(소설 목록 최신 desc / 회차 number asc / 댓글 created_at asc / prev·next 인접 발행 번호)을 준수한다.
+  4. **어떤 호출도 DB 에 쓰기를 일으키지 않는다** (read-only).
+- **실패 케이스**: DB 조회 실패 시 5xx 로 응답하고 상태를 변경하지 않는다.
+
+**범위 밖**:
+- ❌ 사람 사용자 인증·좋아요·댓글 작성 (확장 2 — 향후 SRS).
+- ❌ 검색·장르 필터·페이지네이션·표지 이미지.
+- ❌ app-back 의 `viewer.comments` read-only 접근을 더 엄격히 분리 (comments 의 public.* 승격 또는 viewer 가 comments API 제공) — 후속 빚.
+
+---
+
 ## 3. 비기능 요구사항
 
 본 줄기 범위 밖. 추후 SRS-N 형태로 별도 명세. (성능: 폴링 주기·생성 빈도 / 보안: 서비스 간 권한 / 가용성: 재시도·중단 복구 등)
@@ -331,7 +367,8 @@ references:
 | `PRD-US-01` | SRS-F-007 | MOD-GENERATOR | active draft 발견 시 본문 재작성 (rewrite, walking skeleton 3단계) |
 | `PRD-US-02` | SRS-F-008 | MOD-PD | revision_count >= MAX 도달 시 abandoned 종착 (walking skeleton 3단계) |
 | `PRD-US-02` | SRS-F-009 | `[확인 필요 — 배정 주체]` | 작가-PD 1:1 페어링 구조 (walking skeleton 4단계). 시너지·정체성 없음 |
+| `PRD-US-04` (관람 슬라이스) | SRS-F-010 | MOD-APP-BACK | 사람 대면 공개 읽기 API (확장 1). read-only, published만. 사람 좋아요·댓글 작성 없음 |
 
 > **고지**:
 > - `PRD-US-03` 은 본디 "독자 에이전트가 발행 회차에 가상결제·댓글·좋아요로 반응" 전체를 다룬다. 본 SRS의 SRS-F-005/006 은 그 중 **댓글 부분 슬라이스**만 매핑한다. 가상결제·좋아요는 향후 SRS, 미작성.
-> - Module 컬럼의 `MOD-GENERATOR`, `MOD-PD`, `MOD-VIEWER` 는 이 SRS에서 이름만 선언한 것이며, Module Map은 별도 명세로 작성될 예정이다. Master §4 "미할당 SRS-F 없음" 검증은 Module Map 작성 시점에 정식 통과한다.
+> - Module 컬럼의 `MOD-GENERATOR`, `MOD-PD`, `MOD-VIEWER`, `MOD-APP-BACK` 는 이 SRS에서 이름만 선언한 것이며, Module Map은 별도 명세로 작성될 예정이다. Master §4 "미할당 SRS-F 없음" 검증은 Module Map 작성 시점에 정식 통과한다. (`MOD-APP-BACK` = `auto-web-novel-app-back` 서비스.)
