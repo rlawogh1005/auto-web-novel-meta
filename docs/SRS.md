@@ -1,8 +1,8 @@
 ---
 spec_type: SRS (Software Requirements Specification)
-scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 + 작가-PD 1:1 페어링 골격 + 사람 대면 공개 읽기 API (app-back) (사람 좋아요/댓글·가상결제는 범위 밖)
+scope: 회차 생성·검수 + rewrite 루프 줄기 + AI 독자 댓글 줄기 + 작가-PD 1:1 페어링 골격 + 사람 대면 공개 읽기 API (app-back) + 운영자 관리 API (admin-back) (사람 좋아요/댓글·가상결제는 범위 밖)
 status: 검증 대기
-updated_at: 2026-06-09
+updated_at: 2026-06-10
 references:
   - meta-specs/Product-Requirements-Meta-Spec-Info.md §SRS
   - docs/Domain-Model.md
@@ -22,7 +22,7 @@ references:
 >
 > NFR(성능·보안·가용성)과 다른 줄기(사람 UI 좋아요/댓글 작성, 독자 가상결제)는 본 명세 범위 밖이다.
 
-> **PRD-US 매핑 안내**: SRS-F-001~004 / SRS-F-007 / SRS-F-008 / SRS-F-009 는 PRD-US-01/02 (작가·PD)에 매핑된다. SRS-F-005~006은 PRD-US-03 (독자) 중 **댓글 부분**에만 매핑된다 — 가상결제·좋아요는 향후 SRS, 미작성. SRS-F-010 은 PRD-US-04 (사람 관람) 중 **읽기 부분**에 매핑된다 — 사람 좋아요·댓글 작성은 향후 SRS, 미작성.
+> **PRD-US 매핑 안내**: SRS-F-001~004 / SRS-F-007 / SRS-F-008 / SRS-F-009 는 PRD-US-01/02 (작가·PD)에 매핑된다. SRS-F-005~006은 PRD-US-03 (독자) 중 **댓글 부분**에만 매핑된다 — 가상결제·좋아요는 향후 SRS, 미작성. SRS-F-010 은 PRD-US-04 (사람 관람) 중 **읽기 부분**에 매핑된다 — 사람 좋아요·댓글 작성은 향후 SRS, 미작성. SRS-F-011 은 PRD-US-05 (운영자) 중 **에이전트 등록·연재 매핑·댓글 관리·모니터링 부분**에 매핑된다 — 인증은 향후 SRS, 미작성.
 
 ---
 
@@ -348,6 +348,75 @@ references:
 
 ---
 
+### SRS-F-011 — 운영자 관리 API (admin-back)
+
+**설명**: admin-back 은 운영자(PRD-US-05)가 에이전트 등록·연재 시작(매핑)·댓글 관리·전체 모니터링을 수행하는 백엔드. read-all(전 스키마) + 지정 레지스트리/novels/comments write. 정체성(.md)은 파일 유지 — admin 은 레지스트리 row 등록까지(SOUL 본문 작성 범위 밖). 인증 없음(로컬, 후속). LLM 없음. SoC 로 app-back(공개 읽기 전용)과 분리됨 (WORLD.md 2026-06-10).
+
+**maps_to_prd**: `PRD-US-05`
+
+**owner_module**: `MOD-ADMIN-BACK`
+
+**acceptance**:
+
+#### 에이전트 등록
+
+- **Given**: admin-back 이 요청을 받는다.
+- **When**: `POST /writers`, `POST /pd-agents`, `POST /reader-personas` 중 하나가 호출된다 (요청 바디에 `id` 및 필수 필드 포함).
+- **Then**:
+  1. 각각 `generator.writers`, `pd.pd_agents`, `viewer.reader_personas` 에 `active=true` 로 row 가 INSERT 된다.
+  2. 동일 `id` 가 이미 존재하면 `409 Conflict` 로 거부된다 (중복 등록 방지).
+  3. INSERT 성공 시 생성된 row 를 응답으로 반환한다.
+
+#### active 토글
+
+- **Given**: 지정 레지스트리(writers / pd-agents / reader-personas) 에 해당 `id` 의 row 가 존재한다.
+- **When**: `PATCH /writers/{id}`, `PATCH /pd-agents/{id}`, `PATCH /reader-personas/{id}` 가 `{"active": true/false}` 바디로 호출된다.
+- **Then**:
+  1. 해당 row 의 `active` 컬럼이 요청값으로 갱신된다.
+  2. 존재하지 않는 `id` → `404 Not Found`.
+
+#### 연재 시작 (매핑)
+
+- **Given**: `generator.writers` 에 `active=true` 인 writer, `pd.pd_agents` 에 `active=true` 인 pd-agent 가 각 1명 이상 존재한다.
+- **When**: `POST /novels` 가 `{writer_id, assigned_pd_id, title, genre, premise}` 바디로 호출된다.
+- **Then**:
+  1. 동일 트랜잭션 안에서 다음이 모두 일어난다:
+     - `public.novels(writer_id, assigned_pd_id, title, genre, premise, status='drafting')` row INSERT.
+     - `generator.writer_contexts` 에 해당 `novel_id` 초기 row INSERT (big_story_outline·detailed_story_plan·episodes·foreshadows·feedback_log 초기화).
+     - 어느 한 작업이 실패하면 전체 롤백.
+  2. 부분 유니크 인덱스 `novels_one_active_per_writer`(동일 writer 의 `status='drafting'` novel 최대 1개) 위반 → `409 Conflict`.
+  3. 부분 유니크 인덱스 `novels_one_active_per_pd`(동일 pd 의 `status='drafting'` novel 최대 1개) 위반 → `409 Conflict`.
+  4. 성공 시 생성된 novel row 를 응답으로 반환한다.
+
+#### 댓글 관리
+
+- **Given**: `viewer.comments` 에 해당 `id` 의 comment row 가 존재한다.
+- **When**: `DELETE /comments/{id}` 가 호출된다.
+- **Then**:
+  1. 해당 `viewer.comments` row 가 삭제된다.
+  2. 존재하지 않는 `id` → `404 Not Found`.
+
+#### 모니터링 (읽기 전용)
+
+- **Given**: DB 에 각 스키마 데이터가 존재한다.
+- **When**: 운영자가 모니터링 엔드포인트를 호출한다.
+- **Then**:
+  1. `GET /overview` → 전체 novels·chapters·comments·agents 수치 요약.
+  2. `GET /novels` → 전체 novels (status 무관) 목록.
+  3. `GET /chapters` → 전체 chapters (status 무관) 목록.
+  4. `GET /reviews` → `pd.reviews` 전체 목록.
+  5. `GET /comments` → `viewer.comments` 전체 목록.
+  6. `GET /agents` → writers·pd-agents·reader-personas 전체 목록.
+  7. **어떤 모니터링 호출도 DB 에 쓰기를 일으키지 않는다** (read-only).
+
+**범위 밖**:
+- ❌ 인증 (로컬 전제, 향후 SRS).
+- ❌ 정체성 본문(SOUL.md 등) DB 이전 — 파일 유지.
+- ❌ StorySpec 자동 Novel 생성 파이프라인 (generator 가 cron 으로 처리).
+- ❌ 사람 사용자 대면 API (app-back 소관).
+
+---
+
 ## 3. 비기능 요구사항
 
 본 줄기 범위 밖. 추후 SRS-N 형태로 별도 명세. (성능: 폴링 주기·생성 빈도 / 보안: 서비스 간 권한 / 가용성: 재시도·중단 복구 등)
@@ -368,7 +437,8 @@ references:
 | `PRD-US-02` | SRS-F-008 | MOD-PD | revision_count >= MAX 도달 시 abandoned 종착 (walking skeleton 3단계) |
 | `PRD-US-02` | SRS-F-009 | `[확인 필요 — 배정 주체]` | 작가-PD 1:1 페어링 구조 (walking skeleton 4단계). 시너지·정체성 없음 |
 | `PRD-US-04` (관람 슬라이스) | SRS-F-010 | MOD-APP-BACK | 사람 대면 공개 읽기 API (확장 1). read-only, published만. 사람 좋아요·댓글 작성 없음 |
+| `PRD-US-05` | SRS-F-011 | MOD-ADMIN-BACK | 운영자 관리 API (에이전트 등록·연재 매핑·댓글 관리·모니터링). 인증 없음(로컬, 후속) |
 
 > **고지**:
 > - `PRD-US-03` 은 본디 "독자 에이전트가 발행 회차에 가상결제·댓글·좋아요로 반응" 전체를 다룬다. 본 SRS의 SRS-F-005/006 은 그 중 **댓글 부분 슬라이스**만 매핑한다. 가상결제·좋아요는 향후 SRS, 미작성.
-> - Module 컬럼의 `MOD-GENERATOR`, `MOD-PD`, `MOD-VIEWER`, `MOD-APP-BACK` 는 이 SRS에서 이름만 선언한 것이며, Module Map은 별도 명세로 작성될 예정이다. Master §4 "미할당 SRS-F 없음" 검증은 Module Map 작성 시점에 정식 통과한다. (`MOD-APP-BACK` = `auto-web-novel-app-back` 서비스.)
+> - Module 컬럼의 `MOD-GENERATOR`, `MOD-PD`, `MOD-VIEWER`, `MOD-APP-BACK`, `MOD-ADMIN-BACK` 는 이 SRS에서 이름만 선언한 것이며, Module Map은 별도 명세로 작성될 예정이다. Master §4 "미할당 SRS-F 없음" 검증은 Module Map 작성 시점에 정식 통과한다. (`MOD-APP-BACK` = `auto-web-novel-app-back` 서비스. `MOD-ADMIN-BACK` = `auto-web-novel-admin-back` 서비스.)

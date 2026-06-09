@@ -144,13 +144,16 @@
 | pd | Python+FastAPI | 8002 | 검수 | Draft | Review |
 | viewer | Python+FastAPI | 8003 | reader-agents (읽고 댓글) | Published | Comments |
 | app-back | Python+FastAPI | 8004 | 사람 대면 읽기 API (발행 콘텐츠·댓글 서빙) | Published+Comments (DB read) | API |
-| admin | Next.js | 3001 | 운영 UI | - | StorySpec, Persona |
+| admin-back | Python+FastAPI | 8005 | 운영자 관리 API (에이전트 등록·연재 매핑·댓글 관리·모니터링) | 운영자 입력 | DB write/read |
+| admin | Next.js | 3001 | 운영 UI | admin-back API | UI |
 | web-app-front | Next.js | 3000 | 사용자 웹 (읽기 UI) | app-back API | UI |
 | mobile-app | React Native Expo | - | 모바일 | app-back API | UI |
 
 > **역할 분리 (SoC, 2026-06-09)**: 발행 콘텐츠를 사람에게 서빙하는 책임을 viewer 에서 분리해
 > 전용 백엔드 **app-back** 으로 옮김. viewer 는 자율 reader-agents 전용. web-app-front·mobile-app
 > 은 app-back 의 읽기 API 만 호출(DB 직접 접근 금지). app-back 은 read-only (쓰기·LLM 없음).
+>
+> **운영자 백엔드 분리 (SoC, 2026-06-10)**: 운영자의 쓰기·읽기(에이전트 등록·연재 매핑·댓글 관리·모니터링) 책임을 전용 백엔드 **admin-back** 으로 분리. admin(UI) 은 admin-back API 만 호출. app-back 은 사람 독자 대상 공개 읽기 전용으로 유지 — 쓰기·운영자 기능 없음. 인증 없음(로컬, 후속).
 
 ---
 
