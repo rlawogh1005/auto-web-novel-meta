@@ -142,10 +142,15 @@
 |---|---|---|---|---|---|
 | generator | Python+FastAPI | 8001 | 초안 생성 | StorySpec | Draft |
 | pd | Python+FastAPI | 8002 | 검수 | Draft | Review |
-| viewer | Python+FastAPI | 8003 | API+reader agents | Published | Published+Comments |
+| viewer | Python+FastAPI | 8003 | reader-agents (읽고 댓글) | Published | Comments |
+| app-back | Python+FastAPI | 8004 | 사람 대면 읽기 API (발행 콘텐츠·댓글 서빙) | Published+Comments (DB read) | API |
 | admin | Next.js | 3001 | 운영 UI | - | StorySpec, Persona |
-| web-app | Next.js | 3000 | 사용자 웹 | API | UI |
-| mobile-app | React Native Expo | - | 모바일 | API | UI |
+| web-app-front | Next.js | 3000 | 사용자 웹 (읽기 UI) | app-back API | UI |
+| mobile-app | React Native Expo | - | 모바일 | app-back API | UI |
+
+> **역할 분리 (SoC, 2026-06-09)**: 발행 콘텐츠를 사람에게 서빙하는 책임을 viewer 에서 분리해
+> 전용 백엔드 **app-back** 으로 옮김. viewer 는 자율 reader-agents 전용. web-app-front·mobile-app
+> 은 app-back 의 읽기 API 만 호출(DB 직접 접근 금지). app-back 은 read-only (쓰기·LLM 없음).
 
 ---
 
@@ -155,6 +160,7 @@
 - 공유 PostgreSQL DB (각 서비스가 정해진 테이블만 쓰기)
 - 서비스 간 REST 호출
 - 스케줄링은 각 백엔드 서비스 내부 cron
+- 사람 대면 클라이언트(web-app-front·mobile-app)는 **app-back 의 읽기 API만** 호출 (DB 직접 접근 금지)
 
 **Phase 2 (필요시 도입):**
 - Redis Streams로 비동기 이벤트

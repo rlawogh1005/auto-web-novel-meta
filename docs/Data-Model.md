@@ -286,6 +286,8 @@ comments (1) ────────────────▶ (1) comment_run
 
 viewer는 SQLAlchemy로 `public.chapters`(읽기) + `viewer.*`(쓰기)에 직접 접근한다.
 
+**app-back (사람 대면 읽기 API, SRS-F-010)**: 자기 스키마를 소유하지 않는다 — `public.novels`·`public.chapters`·`viewer.comments` 를 **모두 읽기 전용**으로 접근해 서빙한다 (쓰기·LLM 없음). `viewer.comments` 의 쓰기 소유는 viewer 이고 app-back 은 서빙 계층의 read-only 접근이다 (더 엄격한 분리는 후속 빚 — SRS-F-010 범위 밖 절 참조).
+
 특수 케이스:
 - **Chapter.status 전이**: status 컬럼은 `public`에 있으나 쓰기 권한이 두 서비스에 걸쳐 있다. SRS-F-002는 generator, SRS-F-003/004는 pd가 수행한다. 권한 분리는 DB 레벨 GRANT 또는 애플리케이션 레벨 정책으로 강제 (`[확인 필요]`).
 - **WriterContext.feedback_log 갱신**: pd가 reject 시 generator 스키마의 테이블을 갱신해야 하므로 §5 원칙의 예외. 구현 옵션 (둘 다 가능, 결정은 ADR로 추후):
